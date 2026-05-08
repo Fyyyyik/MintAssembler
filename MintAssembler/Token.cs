@@ -1,0 +1,71 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Text;
+
+namespace MintAssembler
+{
+    public enum TokenType
+    {
+        // Literals
+        IntLiteral,
+        FloatLiteral,
+        StringLiteral,
+        BoolLiteral,
+
+        // Identifier (class names, variables names...)
+        Identifier,
+
+        // Keywords
+        New,
+        Class,
+        Return,
+        If,
+        Else,
+        While,
+        For,
+
+        // Types, the basic ones (could also be Identifiers, resolve those later)
+        Int,
+        Float,
+        Bool,
+        String,
+
+        // Operators
+        Plus,               // +
+        Minus,              // -
+        Star,               // *
+        Slash,              // /
+        Equals,             // =
+        DoubleEquals,       // ==
+        NotEqual,           // !=
+        Greater,            // >
+        Lesser,             // <
+        GreaterEquals,      // >=
+        LesserEquals,       // <=
+        Not,                // !
+
+        // Punctuation
+        Semicolon,          // ;
+        Comma,              // ,
+        Dot,                // .
+        Colon,              // :
+        OpenParen,          // (
+        CloseParen,         // )
+        OpenBrace,          // {
+        CloseBrace,         // }
+        OpenBracket,        // [
+        CloseBracket,       // ]
+
+        // Special
+        EOF
+    }
+
+    /// <summary>
+    /// Holds data about a bunch of text from the source file.
+    /// </summary>
+    /// <param name="Type">What kind of thing is this.</param>
+    /// <param name="Value">The actual text read from the source file.</param>
+    /// <param name="Line">What line was this token found on.</param>
+    /// <param name="Column">What column the token starts.</param>
+    public record Token(TokenType Type, string Value, int Line, int Column);
+}
