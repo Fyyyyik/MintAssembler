@@ -35,6 +35,7 @@ namespace MintAssembler
         Minus,              // -
         Star,               // *
         Slash,              // /
+        Modulo,             // %
         Equals,             // =
         DoubleEquals,       // ==
         NotEqual,           // !=
@@ -43,6 +44,12 @@ namespace MintAssembler
         GreaterEquals,      // >=
         LesserEquals,       // <=
         Not,                // !
+        PlusEquals,         // +=
+        MinusEquals,        // -=
+        StarEquals,         // *=
+        SlashEquals,        // /=
+        DoublePlus,         // ++
+        DoubleMinus,        // --
 
         // Punctuation
         Semicolon,          // ;

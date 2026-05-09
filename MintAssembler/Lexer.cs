@@ -185,10 +185,17 @@ namespace MintAssembler
             char ch = Advance();
             return ch switch
             {
-                '+' => new Token(TokenType.Plus, "+", line, col),
-                '-' => new Token(TokenType.Minus, "-", line, col),
-                '*' => new Token(TokenType.Star, "*", line, col),
-                '/' => new Token(TokenType.Slash, "/", line, col),
+                '+' => Peek == '=' ? (Advance(), new Token(TokenType.PlusEquals, "+=", line, col)).Item2
+                     : Peek == '+' ? (Advance(), new Token(TokenType.DoublePlus, "++", line, col)).Item2
+                                   : new Token(TokenType.Plus, "+", line, col),
+                '-' => Peek == '=' ? (Advance(), new Token(TokenType.MinusEquals, "-=", line, col)).Item2
+                     : Peek == '-' ? (Advance(), new Token(TokenType.DoubleMinus, "--", line, col)).Item2
+                                   : new Token(TokenType.Minus, "-", line, col),
+                '*' => Peek == '=' ? (Advance(), new Token(TokenType.StarEquals, "*=", line, col)).Item2
+                                   : new Token(TokenType.Star, "*", line, col),
+                '/' => Peek == '=' ? (Advance(), new Token(TokenType.SlashEquals, "/=", line, col)).Item2
+                                   : new Token(TokenType.Slash, "/", line, col),
+                '%' => new Token(TokenType.Modulo, "%", line, col),
                 ';' => new Token(TokenType.Semicolon, ";", line, col),
                 ',' => new Token(TokenType.Comma, ",", line, col),
                 '.' => new Token(TokenType.Dot, ".", line, col),

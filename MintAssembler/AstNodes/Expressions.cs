@@ -26,6 +26,6 @@ namespace MintAssembler.AstNodes
         string Function,
         List<ExprNode> Args
     ) : ExprNode;
-    public record NewObjectNode(string ClassName, List<ExprNode> Args) : ExprNode;
+    public record NewObjectNode(string ClassName) : ExprNode;
     public record ArrayCreationNode(TypeNode ElementType, ExprNode Size) : ExprNode;
 }

@@ -46,4 +46,12 @@ namespace MintAssembler.AstNodes
     public record ReturnNode(ExprNode? Value) : StmtNode;
 
     public record ExprStmtNode(ExprNode Expr) : StmtNode;
+
+    public record MemberAssignNode(
+        ExprNode Object,
+        string Member,
+        ExprNode Value
+    ) : StmtNode;
+
+    public record IncrementNode(string Name, bool IsPrefix, bool IsIncrement) : StmtNode;
 }
