@@ -319,6 +319,12 @@ namespace MintAssembler
                     TokenType.MinusEquals => "-",
                     TokenType.StarEquals => "*",
                     TokenType.SlashEquals => "/",
+                    TokenType.PercentEquals => "%",
+                    TokenType.AmpersandEquals => "&",
+                    TokenType.PipeEquals => "|",
+                    TokenType.CaretEquals => "^",
+                    TokenType.DoubleGreaterEquals => ">>",
+                    TokenType.DoubleLessEquals => "<<",
                     _ => throw new ParserException("Unknown compound operator", Current.Line, Current.Column)
                 };
                 _pos++;
@@ -350,7 +356,13 @@ namespace MintAssembler
         private bool IsCompoundAssign() => Current.Type is TokenType.PlusEquals
                                                         or TokenType.MinusEquals
                                                         or TokenType.StarEquals
-                                                        or TokenType.SlashEquals;
+                                                        or TokenType.SlashEquals
+                                                        or TokenType.PercentEquals
+                                                        or TokenType.AmpersandEquals
+                                                        or TokenType.PipeEquals
+                                                        or TokenType.CaretEquals
+                                                        or TokenType.DoubleGreaterEquals
+                                                        or TokenType.DoubleLessEquals;
 
         private ExprNode ParseExpression() => ParseEquality();
 
@@ -368,9 +380,81 @@ namespace MintAssembler
 
         private ExprNode ParseComparison()
         {
-            ExprNode left = ParseAddition();
+            ExprNode left = ParseLogicalOr();
             while (Current.Type is TokenType.Greater or TokenType.GreaterEquals
                                 or TokenType.Lesser or TokenType.LesserEquals)
+            {
+                string op = _tokens[_pos++].Value;
+                ExprNode right = ParseLogicalOr();
+                left = new BinaryExprNode(left, op, right);
+            }
+            return left;
+        }
+
+        private ExprNode ParseLogicalOr()
+        {
+            ExprNode left = ParseLogicalAnd();
+            while (Current.Type is TokenType.DoublePipe)
+            {
+                string op = _tokens[_pos++].Value;
+                ExprNode right = ParseLogicalAnd();
+                left = new BinaryExprNode(left, op, right);
+            }
+            return left;
+        }
+
+        private ExprNode ParseLogicalAnd()
+        {
+            ExprNode left = ParseOr();
+            while (Current.Type is TokenType.DoubleAmpersand)
+            {
+                string op = _tokens[_pos++].Value;
+                ExprNode right = ParseOr();
+                left = new BinaryExprNode(left, op, right);
+            }
+            return left;
+        }
+
+        private ExprNode ParseOr()
+        {
+            ExprNode left = ParseXor();
+            while (Current.Type is TokenType.Pipe)
+            {
+                string op = _tokens[_pos++].Value;
+                ExprNode right = ParseXor();
+                left = new BinaryExprNode(left, op, right);
+            }
+            return left;
+        }
+
+        private ExprNode ParseXor()
+        {
+            ExprNode left = ParseAnd();
+            while (Current.Type is TokenType.Caret)
+            {
+                string op = _tokens[_pos++].Value;
+                ExprNode right = ParseAnd();
+                left = new BinaryExprNode(left, op, right);
+            }
+            return left;
+        }
+
+        private ExprNode ParseAnd()
+        {
+            ExprNode left = ParseShift();
+            while (Current.Type is TokenType.Ampersand)
+            {
+                string op = _tokens[_pos++].Value;
+                ExprNode right = ParseShift();
+                left = new BinaryExprNode(left, op, right);
+            }
+            return left;
+        }
+
+        private ExprNode ParseShift()
+        {
+            ExprNode left = ParseAddition();
+            while (Current.Type is TokenType.DoubleGreater or TokenType.DoubleLess)
             {
                 string op = _tokens[_pos++].Value;
                 ExprNode right = ParseAddition();
@@ -394,7 +478,7 @@ namespace MintAssembler
         private ExprNode ParseMultiplication()
         {
             ExprNode left = ParseUnary();
-            while (Current.Type is TokenType.Star or TokenType.Slash)
+            while (Current.Type is TokenType.Star or TokenType.Slash or TokenType.Percent)
             {
                 string op = _tokens[_pos++].Value;
                 ExprNode right = ParseUnary();

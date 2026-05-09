@@ -31,25 +31,38 @@ namespace MintAssembler
         String,
 
         // Operators
-        Plus,               // +
-        Minus,              // -
-        Star,               // *
-        Slash,              // /
-        Modulo,             // %
-        Equals,             // =
-        DoubleEquals,       // ==
-        NotEqual,           // !=
-        Greater,            // >
-        Lesser,             // <
-        GreaterEquals,      // >=
-        LesserEquals,       // <=
-        Not,                // !
-        PlusEquals,         // +=
-        MinusEquals,        // -=
-        StarEquals,         // *=
-        SlashEquals,        // /=
-        DoublePlus,         // ++
-        DoubleMinus,        // --
+        Plus,                // +
+        Minus,               // -
+        Star,                // *
+        Slash,               // /
+        Percent,             // %
+        Equals,              // =
+        DoubleEquals,        // ==
+        NotEqual,            // !=
+        Greater,             // >
+        Lesser,              // <
+        GreaterEquals,       // >=
+        LesserEquals,        // <=
+        Not,                 // !
+        PlusEquals,          // +=
+        MinusEquals,         // -=
+        StarEquals,          // *=
+        SlashEquals,         // /=
+        DoublePlus,          // ++
+        DoubleMinus,         // --
+        Ampersand,           // &
+        Pipe,                // |
+        Caret,               // ^
+        DoubleLess,          // <<
+        DoubleGreater,       // >>
+        PercentEquals,       // %=
+        AmpersandEquals,     // &=
+        PipeEquals,          // |=
+        CaretEquals,         // ^=
+        DoubleLessEquals,    // <<=
+        DoubleGreaterEquals, // >>=
+        DoubleAmpersand,     // &&
+        DoublePipe,          // ||
 
         // Punctuation
         Semicolon,          // ;

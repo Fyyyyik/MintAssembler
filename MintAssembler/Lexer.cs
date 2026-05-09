@@ -183,39 +183,149 @@ namespace MintAssembler
         private Token ReadSymbol(int line, int col)
         {
             char ch = Advance();
-            return ch switch
+            switch (ch)
             {
-                '+' => Peek == '=' ? (Advance(), new Token(TokenType.PlusEquals, "+=", line, col)).Item2
-                     : Peek == '+' ? (Advance(), new Token(TokenType.DoublePlus, "++", line, col)).Item2
-                                   : new Token(TokenType.Plus, "+", line, col),
-                '-' => Peek == '=' ? (Advance(), new Token(TokenType.MinusEquals, "-=", line, col)).Item2
-                     : Peek == '-' ? (Advance(), new Token(TokenType.DoubleMinus, "--", line, col)).Item2
-                                   : new Token(TokenType.Minus, "-", line, col),
-                '*' => Peek == '=' ? (Advance(), new Token(TokenType.StarEquals, "*=", line, col)).Item2
-                                   : new Token(TokenType.Star, "*", line, col),
-                '/' => Peek == '=' ? (Advance(), new Token(TokenType.SlashEquals, "/=", line, col)).Item2
-                                   : new Token(TokenType.Slash, "/", line, col),
-                '%' => new Token(TokenType.Modulo, "%", line, col),
-                ';' => new Token(TokenType.Semicolon, ";", line, col),
-                ',' => new Token(TokenType.Comma, ",", line, col),
-                '.' => new Token(TokenType.Dot, ".", line, col),
-                ':' => new Token(TokenType.Colon, ":", line, col),
-                '(' => new Token(TokenType.OpenParen, "(", line, col),
-                ')' => new Token(TokenType.CloseParen, ")", line, col),
-                '{' => new Token(TokenType.OpenBrace, "{", line, col),
-                '}' => new Token(TokenType.CloseBrace, "}", line, col),
-                '[' => new Token(TokenType.OpenBracket, "[", line, col),
-                ']' => new Token(TokenType.CloseBracket, "]", line, col),
-                '=' => Peek == '=' ? (Advance(), new Token(TokenType.DoubleEquals, "==", line, col)).Item2
-                                   : new Token(TokenType.Equals, "=", line, col),
-                '!' => Peek == '=' ? (Advance(), new Token(TokenType.NotEqual, "!=", line, col)).Item2
-                                   : new Token(TokenType.Not, "!", line, col),
-                '>' => Peek == '=' ? (Advance(), new Token(TokenType.GreaterEquals, ">=", line, col)).Item2
-                                   : new Token(TokenType.Greater, ">", line, col),
-                '<' => Peek == '=' ? (Advance(), new Token(TokenType.LesserEquals, "<=", line, col)).Item2
-                                   : new Token(TokenType.Lesser, "<", line, col),
-                _ => throw new LexerException($"Unexpected character '{ch}'", line, col)
-            };
+                case '+':
+                    switch (Peek)
+                    {
+                        case '=':
+                            Advance();
+                            return new Token(TokenType.PlusEquals, "+=", line, col);
+                        case '+':
+                            Advance();
+                            return new Token(TokenType.DoublePlus, "++", line, col);
+                    }
+                    return new Token(TokenType.Plus, "+", line, col);
+                case '-':
+                    switch (Peek)
+                    {
+                        case '=':
+                            Advance();
+                            return new Token(TokenType.MinusEquals, "-=", line, col);
+                        case '-':
+                            Advance();
+                            return new Token(TokenType.DoubleMinus, "--", line, col);
+                    }
+                    return new Token(TokenType.Minus, "-", line, col);
+                case '*':
+                    if (Peek == '=')
+                    {
+                        Advance();
+                        return new Token(TokenType.StarEquals, "*=", line, col);
+                    }
+                    return new Token(TokenType.Star, "*", line, col);
+                case '/':
+                    if (Peek == '=')
+                    {
+                        Advance();
+                        return new Token(TokenType.SlashEquals, "/=", line, col);
+                    }
+                    return new Token(TokenType.Slash, "/", line, col);
+                case '%':
+                    if (Peek == '=')
+                    {
+                        Advance();
+                        return new Token(TokenType.PercentEquals, "%=", line, col);
+                    }
+                    return new Token(TokenType.Percent, "%", line, col);
+                case ';':
+                    return new Token(TokenType.Semicolon, ";", line, col);
+                case ',':
+                    return new Token(TokenType.Comma, ",", line, col);
+                case '.':
+                    return new Token(TokenType.Dot, ".", line, col);
+                case ':':
+                    return new Token(TokenType.Colon, ":", line, col);
+                case '(':
+                    return new Token(TokenType.OpenParen, "(", line, col);
+                case ')':
+                    return new Token(TokenType.CloseParen, ")", line, col);
+                case '{':
+                    return new Token(TokenType.OpenBrace, "{", line, col);
+                case '}':
+                    return new Token(TokenType.CloseBrace, "}", line, col);
+                case '[':
+                    return new Token(TokenType.OpenBracket, "[", line, col);
+                case ']':
+                    return new Token(TokenType.CloseBracket, "]", line, col);
+                case '=':
+                    if (Peek == '=')
+                    {
+                        Advance();
+                        return new Token(TokenType.DoubleEquals, "==", line, col);
+                    }
+                    return new Token(TokenType.Equals, "=", line, col);
+                case '!':
+                    if (Peek == '=')
+                    {
+                        Advance();
+                        return new Token(TokenType.NotEqual, "!=", line, col);
+                    }
+                    return new Token(TokenType.Not, "!", line, col);
+                case '>':
+                    switch (Peek)
+                    {
+                        case '=':
+                            Advance();
+                            return new Token(TokenType.GreaterEquals, ">=", line, col);
+                        case '>':
+                            Advance();
+                            if (Peek == '=')
+                            {
+                                Advance();
+                                return new Token(TokenType.DoubleGreaterEquals, ">>=", line, col);
+                            }
+                            return new Token(TokenType.DoubleGreater, ">>", line, col);
+                    }
+                    return new Token(TokenType.Greater, ">", line, col);
+                case '<':
+                    switch (Peek)
+                    {
+                        case '=':
+                            Advance();
+                            return new Token(TokenType.LesserEquals, "<=", line, col);
+                        case '<':
+                            Advance();
+                            if (Peek == '=')
+                            {
+                                Advance();
+                                return new Token(TokenType.DoubleLessEquals, "<<=", line, col);
+                            }
+                            return new Token(TokenType.DoubleLess, "<<", line, col);
+                    }
+                    return new Token(TokenType.Lesser, "<", line, col);
+                case '&':
+                    switch (Peek)
+                    {
+                        case '=':
+                            Advance();
+                            return new Token(TokenType.AmpersandEquals, "&=", line, col);
+                        case '&':
+                            Advance();
+                            return new Token(TokenType.DoubleAmpersand, "&&", line, col);
+                    }
+                    return new Token(TokenType.Ampersand, "&", line, col);
+                case '|':
+                    switch (Peek)
+                    {
+                        case '=':
+                            Advance();
+                            return new Token(TokenType.PipeEquals, "|=", line, col);
+                        case '|':
+                            Advance();
+                            return new Token(TokenType.DoublePipe, "||", line, col);
+                    }
+                    return new Token(TokenType.Pipe, "|", line, col);
+                case '^':
+                    if (Peek == '=')
+                    {
+                        Advance();
+                        return new Token(TokenType.CaretEquals, "^=", line, col);
+                    }
+                    return new Token(TokenType.Caret, "^", line, col);
+            }
+
+            throw new LexerException($"Unexpected character '{ch}'", line, col);
         }
 
         public List<Token> Tokenize()
