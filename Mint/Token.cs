@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using System.Text;
 
-namespace MintAssembler
+namespace Mint
 {
     public enum TokenType
     {

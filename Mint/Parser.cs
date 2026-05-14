@@ -1,9 +1,9 @@
-﻿using MintAssembler.AstNodes;
+﻿using Mint.AstNodes;
 using System;
 using System.Collections.Generic;
 using System.Text;
 
-namespace MintAssembler
+namespace Mint
 {
     public class Parser
     {

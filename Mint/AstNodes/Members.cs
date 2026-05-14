@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using System.Text;
 
-namespace MintAssembler.AstNodes
+namespace Mint.AstNodes
 {
     public abstract record MemberNode : AstNode;
 

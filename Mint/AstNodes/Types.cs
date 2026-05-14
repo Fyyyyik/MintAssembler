@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using System.Text;
 
-namespace MintAssembler.AstNodes
+namespace Mint.AstNodes
 {
     public record TypeNode(string Name, bool IsArray = false) : AstNode;
 }

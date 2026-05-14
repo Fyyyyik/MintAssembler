@@ -1,6 +1,6 @@
 ﻿using System.Text;
 
-namespace MintAssembler
+namespace Mint
 {
     public class Lexer
     {
