@@ -34,14 +34,14 @@ namespace Mint
             return true;
         }
 
-        public ProgramNode Parse()
+        public ModuleNode Parse()
         {
             List<ClassNode> classes = new();
 
             while (!Check(TokenType.EOF))
                 classes.Add(ParseClass());
 
-            return new ProgramNode(classes);
+            return new ModuleNode(classes);
         }
 
         private ClassNode ParseClass()

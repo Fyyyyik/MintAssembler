@@ -27,6 +27,9 @@ namespace MintAssembler
                 Compile(file);
             });
             root.Subcommands.Add(compileCom);
+
+            ParseResult result = root.Parse(args);
+            result.Invoke();
         }
 
         static void Compile(FileInfo inputFile)
@@ -38,8 +41,14 @@ namespace MintAssembler
             }
 
             List<Token> tokens = new Lexer(File.ReadAllText(inputFile.FullName)).Tokenize();
-            ProgramNode program = new Parser(tokens).Parse();
+            Console.WriteLine("Tokens :");
+            foreach (Token token in tokens)
+                Console.WriteLine(token.ToString());
+            Console.WriteLine("\nNodes :");
+            ModuleNode program = new Parser(tokens).Parse();
+            Console.WriteLine(program.ToString());
 
+            Console.WriteLine("MintAssembler has exited.");
         }
     }
 }

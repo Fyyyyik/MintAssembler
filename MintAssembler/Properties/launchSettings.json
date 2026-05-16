@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "MintAssembler": {
+      "commandName": "Project",
+      "commandLineArgs": "compile \"C:\\Users\\maxim\\source\\repos\\MintAssembler\\MyMint.mint\""
+    }
+  }
+}
