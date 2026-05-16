@@ -18,6 +18,7 @@ namespace Mint
             ["else"]        = TokenType.Else,
             ["while"]       = TokenType.While,
             ["for"]         = TokenType.For,
+            ["void"]        = TokenType.Void,
             ["int"]         = TokenType.Int,
             ["float"]       = TokenType.Float,
             ["bool"]        = TokenType.Bool,

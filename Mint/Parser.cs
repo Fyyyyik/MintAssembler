@@ -109,6 +109,7 @@ namespace Mint
         {
             string name = Current.Type switch
             {
+                TokenType.Void => "void",
                 TokenType.Int => "int",
                 TokenType.Float => "float",
                 TokenType.Bool => "bool",

@@ -25,6 +25,7 @@ namespace Mint
         For,
 
         // Types, the basic ones (could also be Identifiers, resolve those later)
+        Void,
         Int,
         Float,
         Bool,
