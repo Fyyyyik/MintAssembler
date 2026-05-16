@@ -4,5 +4,5 @@ using System.Text;
 
 namespace Mint.AstNodes
 {
-    public abstract record AstNode;
+    public abstract record AstNode(int Line, int Column);
 }

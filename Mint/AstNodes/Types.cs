@@ -4,5 +4,5 @@ using System.Text;
 
 namespace Mint.AstNodes
 {
-    public record TypeNode(string Name, bool IsArray = false) : AstNode;
+    public record TypeNode(string Name, int Line, int Column, bool IsArray = false) : AstNode(Line, Column);
 }

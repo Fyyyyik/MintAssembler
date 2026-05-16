@@ -4,54 +4,68 @@ using System.Text;
 
 namespace Mint.AstNodes
 {
-    public abstract record StmtNode : AstNode;
+    public abstract record StmtNode(int Line, int Column) : AstNode(Line, Column);
 
-    public record BlockNode(List<StmtNode> Statements) : AstNode;
+    public record BlockNode(List<StmtNode> Statements, int Line, int Column) : AstNode(Line, Column);
 
     public record VarDeclNode(
         TypeNode Type,
         string Name,
-        ExprNode Initializer
-    ) : StmtNode;
+        ExprNode Initializer,
+        int Line,
+        int Column
+    ) : StmtNode(Line, Column);
 
     public record AssignNode(
         string Name,
-        ExprNode Value
-    ) : StmtNode;
+        ExprNode Value,
+        int Line,
+        int Column
+    ) : StmtNode(Line, Column);
 
     public record ArrayAssignNode(
         ExprNode Array,
         ExprNode Index,
-        ExprNode Value
-    ) : StmtNode;
+        ExprNode Value,
+        int Line,
+        int Column
+    ) : StmtNode(Line, Column);
 
     public record IfNode(
         ExprNode Condition,
         BlockNode Then,
-        BlockNode? Else
-    ) : StmtNode;
+        BlockNode? Else,
+        int Line,
+        int Column
+    ) : StmtNode(Line, Column);
 
     public record WhileNode(
         ExprNode Condition,
-        BlockNode Body
-    ) : StmtNode;
+        BlockNode Body,
+        int Line,
+        int Column
+    ) : StmtNode(Line, Column);
 
     public record ForNode(
         StmtNode Initializer,
         ExprNode Condition,
         StmtNode Increment,
-        BlockNode Body
-    ) : StmtNode;
+        BlockNode Body,
+        int Line,
+        int Column
+    ) : StmtNode(Line, Column);
 
-    public record ReturnNode(ExprNode? Value) : StmtNode;
+    public record ReturnNode(ExprNode? Value, int Line, int Column) : StmtNode(Line, Column);
 
-    public record ExprStmtNode(ExprNode Expr) : StmtNode;
+    public record ExprStmtNode(ExprNode Expr, int Line, int Column) : StmtNode(Line, Column);
 
     public record MemberAssignNode(
         ExprNode Object,
         string Member,
-        ExprNode Value
-    ) : StmtNode;
+        ExprNode Value,
+        int Line,
+        int Column
+    ) : StmtNode(Line, Column);
 
-    public record IncrementNode(string Name, bool IsPrefix, bool IsIncrement) : StmtNode;
+    public record IncrementNode(string Name, bool IsPrefix, bool IsIncrement, int Line, int Column) : StmtNode(Line, Column);
 }

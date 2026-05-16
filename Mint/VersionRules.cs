@@ -5,12 +5,12 @@ using System.Text;
 
 namespace Mint
 {
-    internal class VersionRules
+    public class VersionRules
     {
-        internal ReadOnlyCollection<byte> Version { get; }
-        internal HashSet<TokenType> IllegalTokens { get; init; } = new();
+        public ReadOnlyCollection<byte> Version { get; }
+        public HashSet<TokenType> IllegalTokens { get; init; } = new();
 
-        internal VersionRules(IList<byte> version)
+        public VersionRules(IList<byte> version)
         {
             Version = new ReadOnlyCollection<byte>(version);
         }
@@ -20,7 +20,7 @@ namespace Mint
             return !IllegalTokens.Contains(token.Type);
         }
 
-        internal void ValidateTokens(IList<Token> tokens)
+        public void ValidateTokens(IList<Token> tokens)
         {
             foreach (Token token in tokens)
                 if (!IsTokenLegal(token))

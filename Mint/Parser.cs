@@ -12,6 +12,8 @@ namespace Mint
 
         public Parser(List<Token> tokens) => _tokens = tokens;
 
+        private (int Line, int Column) CurrentPosition => (Current.Line, Current.Column);
+
         private Token Current => _tokens[_pos];
 
         private Token Peek(int offset = 1) => _tokens[Math.Min(_pos + offset, _tokens.Count - 1)];
@@ -36,16 +38,20 @@ namespace Mint
 
         public ModuleNode Parse()
         {
+            var (line, col) = CurrentPosition;
+
             List<ClassNode> classes = new();
 
             while (!Check(TokenType.EOF))
                 classes.Add(ParseClass());
 
-            return new ModuleNode(classes);
+            return new ModuleNode(classes, line, col);
         }
 
         private ClassNode ParseClass()
         {
+            var (line, col) = CurrentPosition;
+
             Expect(TokenType.Class);
             string name = Expect(TokenType.Identifier).Value;
             Expect(TokenType.OpenBrace);
@@ -56,11 +62,13 @@ namespace Mint
 
             Expect(TokenType.CloseBrace);
 
-            return new ClassNode(name, members);
+            return new ClassNode(name, members, line, col);
         }
 
         private MemberNode ParseMember()
         {
+            var (line, col) = CurrentPosition;
+
             // TODO for future versions : handle enums
 
             TypeNode type = ParseType();
@@ -69,22 +77,22 @@ namespace Mint
             // Check whether it's a variable or a function.
             // If we find a '(' then it's a function.
             if (Check(TokenType.OpenParen))
-                return ParseFunction(type, name);
+                return ParseFunction(type, name, line, col);
             else
-                return ParseVariable(type, name);
+                return ParseVariable(type, name, line, col);
         }
 
-        private VariableNode ParseVariable(TypeNode type, string name)
+        private VariableNode ParseVariable(TypeNode type, string name, int line, int col)
         {
             Expect(TokenType.Semicolon);
-            return new VariableNode(type, name);
+            return new VariableNode(type, name, line, col);
         }
 
-        private FunctionNode ParseFunction(TypeNode returnType, string name)
+        private FunctionNode ParseFunction(TypeNode returnType, string name, int line, int col)
         {
             List<ParamNode> parameters = ParseParameterList();
             BlockNode block = ParseBlock();
-            return new FunctionNode(returnType, name, parameters, block);
+            return new FunctionNode(returnType, name, parameters, block, line, col);
         }
 
         private List<ParamNode> ParseParameterList()
@@ -94,9 +102,11 @@ namespace Mint
 
             while (!Check(TokenType.CloseParen) && !Check(TokenType.EOF))
             {
+                var (line, col) = CurrentPosition;
+
                 TypeNode type = ParseType();
                 string name = Expect(TokenType.Identifier).Value;
-                parameters.Add(new ParamNode(type, name));
+                parameters.Add(new ParamNode(type, name, line, col));
 
                 if (!Match(TokenType.Comma)) break;
             }
@@ -107,6 +117,8 @@ namespace Mint
 
         private TypeNode ParseType()
         {
+            var (line, col) = CurrentPosition;
+
             string name = Current.Type switch
             {
                 TokenType.Void => "void",
@@ -129,11 +141,13 @@ namespace Mint
                 isArray = true;
             }
 
-            return new TypeNode(name, isArray);
+            return new TypeNode(name, line, col, isArray);
         }
 
         private BlockNode ParseBlock()
         {
+            var (line, col) = CurrentPosition;
+
             Expect(TokenType.OpenBrace);
             List<StmtNode> statements = new();
 
@@ -141,7 +155,7 @@ namespace Mint
                 statements.Add(ParseStatement());
 
             Expect(TokenType.CloseBrace);
-            return new BlockNode(statements);
+            return new BlockNode(statements, line, col);
         }
 
         private StmtNode ParseStatement()
@@ -204,6 +218,8 @@ namespace Mint
 
         private IfNode ParseIf()
         {
+            var (line, col) = CurrentPosition;
+
             Expect(TokenType.If);
             Expect(TokenType.OpenParen);
             ExprNode condition = ParseExpression();
@@ -214,21 +230,25 @@ namespace Mint
             if (Match(TokenType.Else))
                 els = ParseBlock();
 
-            return new IfNode(condition, then, els);
+            return new IfNode(condition, then, els, line, col);
         }
 
         private WhileNode ParseWhile()
         {
+            var (line, col) = CurrentPosition;
+
             Expect(TokenType.While);
             Expect(TokenType.OpenParen);
             ExprNode condition = ParseExpression();
             Expect(TokenType.CloseParen);
             BlockNode body = ParseBlock();
-            return new WhileNode(condition, body);
+            return new WhileNode(condition, body, line, col);
         }
 
         private ForNode ParseFor()
         {
+            var (line, col) = CurrentPosition;
+
             Expect(TokenType.For);
             Expect(TokenType.OpenParen);
             
@@ -243,43 +263,50 @@ namespace Mint
             Expect(TokenType.CloseParen);
 
             BlockNode body = ParseBlock();
-            return new ForNode(initializer, condition, increment, body);
+            return new ForNode(initializer, condition, increment, body, line, col);
         }
 
         private ReturnNode ParseReturn()
         {
+            var (line, col) = CurrentPosition;
+
             Expect(TokenType.Return);
             ExprNode? value = null;
             if (!Check(TokenType.Semicolon))
                 value = ParseExpression();
             Expect(TokenType.Semicolon);
-            return new ReturnNode(value);
+            return new ReturnNode(value, line, col);
         }
 
         private VarDeclNode ParseVarDecl()
         {
+            var (line, col) = CurrentPosition;
+
             TypeNode type = ParseType();
             string name = Expect(TokenType.Identifier).Value;
             Expect(TokenType.Equals);
             ExprNode initializer = ParseExpression();
             Expect(TokenType.Semicolon);
-            return new VarDeclNode(type, name, initializer);
+            return new VarDeclNode(type, name, initializer, line, col);
         }
 
         private ArrayAssignNode ParseArrayAssign()
         {
-            IdentifierNode array = new(Expect(TokenType.Identifier).Value);
+            var (line, col) = CurrentPosition;
+            IdentifierNode array = new(Expect(TokenType.Identifier).Value, line, col);
             Expect(TokenType.OpenBracket);
             ExprNode index = ParseExpression();
             Expect(TokenType.CloseBracket);
             Expect(TokenType.Equals);
             ExprNode value = ParseExpression();
             Expect(TokenType.Semicolon);
-            return new ArrayAssignNode(array, index, value);
+            return new ArrayAssignNode(array, index, value, line, col);
         }
 
         private StmtNode ParseAssignOrExpr(bool expectSemicolon = true)
         {
+            var (line, col) = CurrentPosition;
+
             // Prefix like ++x or --x
             if (Current.Type is TokenType.DoublePlus or TokenType.DoubleMinus)
             {
@@ -287,7 +314,7 @@ namespace Mint
                 _pos++;
                 string name = Expect(TokenType.Identifier).Value;
                 if (expectSemicolon) Expect(TokenType.Semicolon);
-                return new IncrementNode(name, true, isIncrement);
+                return new IncrementNode(name, true, isIncrement, line, col);
             }
 
             ExprNode expr = ParseExpression();
@@ -299,7 +326,7 @@ namespace Mint
                 bool isIncrement = Current.Type == TokenType.DoublePlus;
                 _pos++;
                 if (expectSemicolon) Expect(TokenType.Semicolon);
-                return new IncrementNode(postfixIdent.Name, false, isIncrement);
+                return new IncrementNode(postfixIdent.Name, false, isIncrement, line, col);
             }
             
             // If the expression is an identifier followed by = it's an assignement
@@ -308,7 +335,7 @@ namespace Mint
                 _pos++; // consume =
                 ExprNode value = ParseExpression();
                 if (expectSemicolon) Expect(TokenType.Semicolon);
-                return new AssignNode(ident.Name, value);
+                return new AssignNode(ident.Name, value, line, col);
             }
 
             // Compound assignements like x += 5
@@ -333,11 +360,13 @@ namespace Mint
                 if (expectSemicolon) Expect(TokenType.Semicolon);
 
                 BinaryExprNode desugared = new(
-                    new IdentifierNode(identCompound.Name),
+                    new IdentifierNode(identCompound.Name, line, col),
                     op,
-                    value
+                    value,
+                    line,
+                    col
                 );
-                return new AssignNode(identCompound.Name, desugared);
+                return new AssignNode(identCompound.Name, desugared, line, col);
             }
 
             // Member assignements like instance.foo = 5
@@ -346,12 +375,12 @@ namespace Mint
                 _pos++;
                 ExprNode value = ParseExpression();
                 if (expectSemicolon) Expect(TokenType.Semicolon);
-                return new MemberAssignNode(member.Object, member.Member, value);
+                return new MemberAssignNode(member.Object, member.Member, value, line, col);
             }
 
             // Otherwise it's just an expression like Foo();
             if (expectSemicolon) Expect(TokenType.Semicolon);
-            return new ExprStmtNode(expr);
+            return new ExprStmtNode(expr, line, col);
         }
 
         private bool IsCompoundAssign() => Current.Type is TokenType.PlusEquals
@@ -372,9 +401,10 @@ namespace Mint
             ExprNode left = ParseComparison();
             while (Current.Type is TokenType.DoubleEquals or TokenType.NotEqual)
             {
+                var (line, col) = CurrentPosition;
                 string op = _tokens[_pos++].Value;
                 ExprNode right = ParseComparison();
-                left = new BinaryExprNode(left, op, right);
+                left = new BinaryExprNode(left, op, right, line, col);
             }
             return left;
         }
@@ -385,9 +415,10 @@ namespace Mint
             while (Current.Type is TokenType.Greater or TokenType.GreaterEquals
                                 or TokenType.Lesser or TokenType.LesserEquals)
             {
+                var (line, col) = CurrentPosition;
                 string op = _tokens[_pos++].Value;
                 ExprNode right = ParseLogicalOr();
-                left = new BinaryExprNode(left, op, right);
+                left = new BinaryExprNode(left, op, right, line, col);
             }
             return left;
         }
@@ -397,9 +428,10 @@ namespace Mint
             ExprNode left = ParseLogicalAnd();
             while (Current.Type is TokenType.DoublePipe)
             {
+                var (line, col) = CurrentPosition;
                 string op = _tokens[_pos++].Value;
                 ExprNode right = ParseLogicalAnd();
-                left = new BinaryExprNode(left, op, right);
+                left = new BinaryExprNode(left, op, right, line, col);
             }
             return left;
         }
@@ -409,9 +441,10 @@ namespace Mint
             ExprNode left = ParseOr();
             while (Current.Type is TokenType.DoubleAmpersand)
             {
+                var (line, col) = CurrentPosition;
                 string op = _tokens[_pos++].Value;
                 ExprNode right = ParseOr();
-                left = new BinaryExprNode(left, op, right);
+                left = new BinaryExprNode(left, op, right, line, col);
             }
             return left;
         }
@@ -421,9 +454,10 @@ namespace Mint
             ExprNode left = ParseXor();
             while (Current.Type is TokenType.Pipe)
             {
+                var (line, col) = CurrentPosition;
                 string op = _tokens[_pos++].Value;
                 ExprNode right = ParseXor();
-                left = new BinaryExprNode(left, op, right);
+                left = new BinaryExprNode(left, op, right, line, col);
             }
             return left;
         }
@@ -433,9 +467,10 @@ namespace Mint
             ExprNode left = ParseAnd();
             while (Current.Type is TokenType.Caret)
             {
+                var (line, col) = CurrentPosition;
                 string op = _tokens[_pos++].Value;
                 ExprNode right = ParseAnd();
-                left = new BinaryExprNode(left, op, right);
+                left = new BinaryExprNode(left, op, right, line, col);
             }
             return left;
         }
@@ -445,9 +480,10 @@ namespace Mint
             ExprNode left = ParseShift();
             while (Current.Type is TokenType.Ampersand)
             {
+                var (line, col) = CurrentPosition;
                 string op = _tokens[_pos++].Value;
                 ExprNode right = ParseShift();
-                left = new BinaryExprNode(left, op, right);
+                left = new BinaryExprNode(left, op, right, line, col);
             }
             return left;
         }
@@ -457,9 +493,10 @@ namespace Mint
             ExprNode left = ParseAddition();
             while (Current.Type is TokenType.DoubleGreater or TokenType.DoubleLess)
             {
+                var (line, col) = CurrentPosition;
                 string op = _tokens[_pos++].Value;
                 ExprNode right = ParseAddition();
-                left = new BinaryExprNode(left, op, right);
+                left = new BinaryExprNode(left, op, right, line, col);
             }
             return left;
         }
@@ -469,9 +506,10 @@ namespace Mint
             ExprNode left = ParseMultiplication();
             while (Current.Type is TokenType.Plus or TokenType.Minus)
             {
+                var (line, col) = CurrentPosition;
                 string op = _tokens[_pos++].Value;
                 ExprNode right = ParseMultiplication();
-                left = new BinaryExprNode(left, op, right);
+                left = new BinaryExprNode(left, op, right, line, col);
             }
             return left;
         }
@@ -481,9 +519,10 @@ namespace Mint
             ExprNode left = ParseUnary();
             while (Current.Type is TokenType.Star or TokenType.Slash or TokenType.Percent)
             {
+                var (line, col) = CurrentPosition;
                 string op = _tokens[_pos++].Value;
                 ExprNode right = ParseUnary();
-                left = new BinaryExprNode(left, op, right);
+                left = new BinaryExprNode(left, op, right, line, col);
             }
             return left;
         }
@@ -492,9 +531,10 @@ namespace Mint
         {
             if (Current.Type is TokenType.Minus or TokenType.Not)
             {
+                var (line, col) = CurrentPosition;
                 string op = _tokens[_pos++].Value;
                 ExprNode operand = ParseUnary();
-                return new UnaryExprNode(op, operand);
+                return new UnaryExprNode(op, operand, line, col);
             }
             return ParsePostfix();
         }
@@ -506,13 +546,15 @@ namespace Mint
             // Keep consuming postfix operations
             while (true)
             {
+                var (line, col) = CurrentPosition;
+
                 // arr[i]
                 if (Check(TokenType.OpenBracket))
                 {
                     _pos++;
                     ExprNode index = ParseExpression();
                     Expect(TokenType.CloseBracket);
-                    expr = new ArrayAccessNode(expr, index);
+                    expr = new ArrayAccessNode(expr, index, line, col);
                 }
                 // Travel through all the members, namespaces, etc...
                 else if (Check(TokenType.Dot))
@@ -526,12 +568,12 @@ namespace Mint
                         _pos++;
                         List<ExprNode> arguments = ParseArgumentsList();
                         Expect(TokenType.CloseParen);
-                        expr = new FunctionCallNode(member, arguments);
+                        expr = new FunctionCallNode(member, arguments, line, col);
                     }
                     // Accessing another member
                     else
                     {
-                        expr = new MemberAccessNode(expr, member);
+                        expr = new MemberAccessNode(expr, member, line, col);
                     }
                 }
                 else break;
@@ -542,15 +584,17 @@ namespace Mint
 
         private ExprNode ParsePrimary()
         {
+            var (line, col) = CurrentPosition;
+
             // Literals
             if (Check(TokenType.IntLiteral))
-                return new IntLiteralNode(int.Parse(_tokens[_pos++].Value));
+                return new IntLiteralNode(int.Parse(_tokens[_pos++].Value), line, col);
             if (Check(TokenType.FloatLiteral))
-                return new FloatLiteralNode(float.Parse(_tokens[_pos++].Value));
+                return new FloatLiteralNode(float.Parse(_tokens[_pos++].Value), line, col);
             if (Check(TokenType.BoolLiteral))
-                return new BoolLiteralNode(_tokens[_pos++].Value == "true");
+                return new BoolLiteralNode(_tokens[_pos++].Value == "true", line, col);
             if (Check(TokenType.StringLiteral))
-                return new StringLiteralNode(_tokens[_pos++].Value);
+                return new StringLiteralNode(_tokens[_pos++].Value, line, col);
 
             // new operator
             if (Check(TokenType.New))
@@ -563,11 +607,11 @@ namespace Mint
                     Expect(TokenType.OpenBracket);
                     ExprNode size = ParseExpression();
                     Expect(TokenType.CloseBracket);
-                    return new ArrayCreationNode(type, size);
+                    return new ArrayCreationNode(type, size, line, col);
                 }
 
                 // Object creation doesn't call a constructor so no parentheses and params
-                return new NewObjectNode(type.Name);
+                return new NewObjectNode(type.Name, line, col);
             }
 
             // Identifier, can be a variable or a call
@@ -581,9 +625,9 @@ namespace Mint
                     _pos++;
                     List<ExprNode> arguments = ParseArgumentsList();
                     Expect(TokenType.CloseParen);
-                    return new FunctionCallNode(name, arguments);
+                    return new FunctionCallNode(name, arguments, line, col);
                 }
-                return new IdentifierNode(name);
+                return new IdentifierNode(name, line, col);
             }
 
             // Grouped expression like (x + y)
