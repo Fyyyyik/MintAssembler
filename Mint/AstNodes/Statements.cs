@@ -59,9 +59,8 @@ namespace Mint.AstNodes
 
     public record ExprStmtNode(ExprNode Expr, int Line, int Column) : StmtNode(Line, Column);
 
-    public record MemberAssignNode(
-        ExprNode Object,
-        string Member,
+    public record QualifiedAssignNode(
+        string FullName,
         ExprNode Value,
         int Line,
         int Column

@@ -457,12 +457,12 @@ namespace Mint
             }
 
             // Member assignements like instance.foo = 5
-            if (expr is MemberAccessNode member && Check(TokenType.Equals))
+            if (expr is QualifiedAccessNode qa && Check(TokenType.Equals))
             {
                 _pos++;
                 ExprNode value = ParseExpression();
                 if (expectSemicolon) Expect(TokenType.Semicolon);
-                return new MemberAssignNode(member.Object, member.Member, value, line, col);
+                return new QualifiedAssignNode(qa.FullName, value, line, col);
             }
 
             // Otherwise it's just an expression like Foo();
@@ -636,32 +636,51 @@ namespace Mint
                 var (line, col) = CurrentPosition;
 
                 // arr[i]
-                if (Check(TokenType.OpenBracket))
+                if (Match(TokenType.OpenBracket))
                 {
-                    _pos++;
                     ExprNode index = ParseExpression();
                     Expect(TokenType.CloseBracket);
                     expr = new ArrayAccessNode(expr, index, line, col);
                 }
-                // Travel through all the members, namespaces, etc...
-                else if (Check(TokenType.Dot))
+                else if (Check(TokenType.Dot) && expr is IdentifierNode ident)
                 {
-                    _pos++;
-                    string member = Expect(TokenType.Identifier).Value;
+                    // We see something like 'Identifier.Identifier.Identifier'
+                    // The parser doesn't know if we're accessing a member or if
+                    // it's a fully qualified name for a function or variable
+                    // That's a semantic concern, so we just assume it's a
+                    // qualified name for now.
 
-                    // Function call
-                    if (Check(TokenType.OpenParen))
+                    StringBuilder fullName = new(ident.Name);
+
+                    while (Match(TokenType.Dot))
+                        fullName.Append(Expect(TokenType.Identifier).Value);
+
+                    if (Match(TokenType.OpenParen))
                     {
-                        _pos++;
-                        List<ExprNode> arguments = ParseArgumentsList();
+                        // A fully qualified function call from wherever the fuck
+                        // Let the semantic analyser decide if that shit is valid later
+                        List<ExprNode> args = ParseArgumentsList();
                         Expect(TokenType.CloseParen);
-                        expr = new FunctionCallNode(member, arguments, line, col);
+                        expr = new QualifiedCallNode(fullName.ToString(), args, line, col);
                     }
-                    // Accessing another member
-                    else
+                    else expr = new QualifiedAccessNode(fullName.ToString(), line, col); // probably an xref var
+                }
+                else if (Check(TokenType.Dot) && expr is not IdentifierNode)
+                {
+                    // Don't know from where and how but we're accessing a
+                    // member here.
+                    // Example : 'Identifier.Identifier.func().member'
+                    // The '.member' part here is what we see.
+
+                    _pos++; // consume the dot yum yum!
+                    string member = Expect(TokenType.Identifier).Value;
+                    if (Match(TokenType.OpenParen))
                     {
-                        expr = new MemberAccessNode(expr, member, line, col);
+                        List<ExprNode> args = ParseArgumentsList();
+                        Expect(TokenType.CloseParen);
+                        expr = new MemberCallNode(expr, member, args, line, col);
                     }
+                    else expr = new MemberAccessNode(expr, member, line, col);
                 }
                 else break;
             }
@@ -726,14 +745,16 @@ namespace Mint
             if (Check(TokenType.Identifier))
             {
                 string name = _tokens[_pos++].Value;
+
                 // If we find parentheses, that's a function call.
                 // Otherwise it's smth else
                 if (Match(TokenType.OpenParen))
                 {
                     List<ExprNode> arguments = ParseArgumentsList();
                     Expect(TokenType.CloseParen);
-                    return new FunctionCallNode(name, arguments, line, col);
+                    return new QualifiedCallNode(name, arguments, line, col);
                 }
+
                 return new IdentifierNode(name, line, col);
             }
 
@@ -756,7 +777,7 @@ namespace Mint
                         // it's a function
                         List<ExprNode> args = ParseArgumentsList();
                         Expect(TokenType.CloseParen);
-                        return new FunctionCallNode(member, args, line, col);
+                        return new MemberCallNode(new ThisNode(line, col), member, args, line, col);
                     }
 
                     // it's accessing a variable

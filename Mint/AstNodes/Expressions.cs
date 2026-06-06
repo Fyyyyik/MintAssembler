@@ -14,6 +14,7 @@ namespace Mint.AstNodes
 
     // Variables and access
     public record IdentifierNode(string Name, int Line, int Column) : ExprNode(Line, Column);
+    public record QualifiedAccessNode(string FullName, int Line, int Column) : ExprNode(Line, Column);
     public record MemberAccessNode(ExprNode Object, string Member, int Line, int Column) : ExprNode(Line, Column);
     public record ArrayAccessNode(ExprNode Array, ExprNode Index, int Line, int Column) : ExprNode(Line, Column);
     public record ThisNode(int Line, int Column): ExprNode(Line, Column);
@@ -23,8 +24,15 @@ namespace Mint.AstNodes
     public record UnaryExprNode(string Op, ExprNode Operand, int Line, int Column) : ExprNode(Line, Column);
 
     // Calls and construction
-    public record FunctionCallNode(
-        string Function,
+    public record QualifiedCallNode( // could either be calling a method from an object or a static method in some namespace
+        string FullName,
+        List<ExprNode> Args,
+        int Line,
+        int Column
+    ) : ExprNode(Line, Column);
+    public record MemberCallNode( // for when we're 100% sure we're calling from an object
+        ExprNode Object,
+        string Name,
         List<ExprNode> Args,
         int Line,
         int Column
