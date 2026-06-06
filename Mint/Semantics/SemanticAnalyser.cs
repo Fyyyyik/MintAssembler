@@ -221,35 +221,95 @@ namespace Mint.Semantics
 
         private TypeNode? ResolveIdentifierType(string name, AstNode context)
         {
-            // Check in the scope
+            // In this house we refer to class variables with 'this' prefixed.
+            // A single identifier is referring to a local variable.
+            return _scopeStack.LookUp(name);
         }
 
         private TypeNode? ResolveMemberAccessType(MemberAccessNode memberAccess)
         {
+            TypeNode? objType = AnalyseExpr(memberAccess.Object);
+            if (objType == null) return null;
 
+            // Array length property
+            if (objType.IsArray && memberAccess.Member == "Length")
+                return new TypeNode("int", memberAccess.Line, memberAccess.Column);
+
+            // Find it in the class
+            if (_module.Classes.TryGetValue(objType.Name, out ClassSymbol? cls))
+            {
+                if (cls.Variables.TryGetValue(memberAccess.Member, out VariableSymbol? varSbl))
+                    return varSbl.Type;
+
+                AddError($"'{objType.Name}' has no variable '{memberAccess.Member}'. Did you forget to reference it with the 'xref' keyword ?", memberAccess);
+                return null;
+            }
+
+            AddError($"'{objType.Name}' is not a known class. Did you forget to reference it with the 'xref' keyword ?", memberAccess);
+            return null;
         }
 
         private TypeNode? ResolveArrayAccessType(ArrayAccessNode arrayAccess)
         {
+            TypeNode? arrayType = AnalyseExpr(arrayAccess.Array);
+            TypeNode? indexType = AnalyseExpr(arrayAccess.Index);
 
+            if (indexType?.Name != "int")
+                AddError("Array index must be an int.", arrayAccess);
+
+            if (arrayType == null || !arrayType.IsArray)
+            {
+                AddError("Cannot index into a non-array type.", arrayAccess);
+                return null;
+            }
+
+            return new TypeNode(arrayType.Name, arrayAccess.Line, arrayAccess.Column, true);
         }
 
         private TypeNode? ResolveBinaryExprType(BinaryExprNode binaryExpr)
         {
+            TypeNode? left = AnalyseExpr(binaryExpr.Left);
+            TypeNode? right = AnalyseExpr(binaryExpr.Right);
 
+            // Comparison operators produce bool
+            if (binaryExpr.Op is "==" or "!=" or ">" or "<" or ">=" or "<=" or "&&" or "||")
+            {
+                if (!TypesMatch(left, right))
+                    AddError($"Cannot compare '{left?.Name}' and '{right?.Name}'.", binaryExpr);
+                return new TypeNode("bool", binaryExpr.Line, binaryExpr.Column);
+            }
+
+            // Bit and shift operations require int
+            // Why the fuck would you want to do that to a float you psycho
+            if (binaryExpr.Op is "&" or "|" or "<<" or ">>" or "^")
+            {
+                if (left?.Name != "int" || right?.Name != "int")
+                    AddError($"Operator '{binaryExpr.Op}' requires int operands.", binaryExpr);
+                return new TypeNode("int", binaryExpr.Line, binaryExpr.Column);
+            }
+
+            // Arithmetic operators
+            if (!TypesMatch(left, right))
+            {
+                AddError($"Cannot apply operator '{binaryExpr.Op}' to operands of type '{left?.Name}' and '{right?.Name}'.", binaryExpr);
+                return null;
+            }
+
+            return left;
         }
 
         private TypeNode? ResolveUnaryExprType(UnaryExprNode unaryExpr)
         {
+            TypeNode? operand = AnalyseExpr(unaryExpr.Operand);
 
+            if (unaryExpr.Op == "-" && operand?.Name is not ("int" or "float"))
+                AddError("Unary operator '-' requires an int or a float.", unaryExpr);
+
+            if (unaryExpr.Op == "!" && operand?.Name != "bool")
+                AddError("Unary operator '!' requires a bool.", unaryExpr);
+
+            return operand;
         }
-
-        private TypeNode? ResolveFunctionCallType(FunctionCallNode functionCall)
-        {
-
-        }
-
-        private TypeNode? Resolve
 
         private static bool TypesMatch(TypeNode? a,  TypeNode? b)
         {
