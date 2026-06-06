@@ -1,12 +1,15 @@
 ﻿using Mint.AstNodes;
 using System;
 using System.Collections.Generic;
+using System.Reflection.Metadata.Ecma335;
 using System.Text;
 
 namespace Mint
 {
     public class Parser
     {
+        private const string VOID_VARIABLE_MSG = "A variable can't have no type.";
+
         private readonly List<Token> _tokens;
         private int _pos;
 
@@ -24,11 +27,12 @@ namespace Mint
         {
             if (!Check(type))
                 throw new ParserException(
-                    $"Expected {type} but got '{Current.Value}'",
+                    $"Expected '{type}' but got '{Current.Value}'",
                     Current.Line, Current.Column);
             return _tokens[_pos++];
         }
 
+        // Same as Check but advances by one token if it is the correct type.
         private bool Match(TokenType type)
         {
             if (!Check(type)) return false;
@@ -36,16 +40,90 @@ namespace Mint
             return true;
         }
 
+        private string ReadFullName()
+        {
+            StringBuilder sb = new();
+            bool isEnd = false;
+            while (!isEnd)
+            {
+                sb.Append(Expect(TokenType.Identifier).Value);
+                if (Match(TokenType.Dot))
+                    sb.Append('.');
+                else
+                    isEnd = true;
+            }
+            return sb.ToString();
+        }
+
         public ModuleNode Parse()
+        {
+            NamespaceNode modNamespace = ParseNamespace();
+
+            List<ClassNode> classes = new();
+            List<ExternalVariableNode> extVars = new();
+            List<ExternalFunctionNode> extFunctions = new();
+            while (!Check(TokenType.EOF))
+                switch (Current.Type)
+                {
+                    case TokenType.XRef:
+                        AstNode extDecl = ParseExternal();
+                        switch (extDecl)
+                        {
+                            case ExternalVariableNode v: extVars.Add(v); break;
+                            case ExternalFunctionNode f: extFunctions.Add(f); break;
+                        }
+                        break;
+                    case TokenType.Class:
+                        classes.Add(ParseClass());
+                        break;
+                }
+
+            return new ModuleNode(modNamespace, classes, extVars, extFunctions, 0, 0);
+        }
+
+        private NamespaceNode ParseNamespace()
         {
             var (line, col) = CurrentPosition;
 
-            List<ClassNode> classes = new();
+            Expect(TokenType.Namespace);
 
-            while (!Check(TokenType.EOF))
-                classes.Add(ParseClass());
+            string name = ReadFullName();
 
-            return new ModuleNode(classes, line, col);
+            Expect(TokenType.Semicolon);
+
+            return new NamespaceNode(name, line, col);
+        }
+
+        private AstNode ParseExternal()
+        {
+            var (line, col) = CurrentPosition;
+
+            Expect(TokenType.XRef);
+
+            TypeNode? type = ParseType();
+            string name = ReadFullName();
+            if (Match(TokenType.OpenParen))
+            {
+                // Function, get the types of the parameters, if any
+                List<TypeNode> paramTypes = new();
+                while (!Match(TokenType.CloseParen))
+                {
+                    var (typeLine, typeCol) = CurrentPosition;
+
+                    TypeNode? newType = ParseType();
+                    if (newType == null)
+                        throw new ParserException(VOID_VARIABLE_MSG, typeLine, typeCol);
+                    paramTypes.Add(newType);
+                }
+                Expect(TokenType.Semicolon);
+                return new ExternalFunctionNode(type, name, paramTypes, line, col);
+            }
+
+            // Variable
+            if (type == null)
+                throw new ParserException(VOID_VARIABLE_MSG, line, col);
+            Expect(TokenType.Semicolon);
+            return new ExternalVariableNode(type, name, line, col);
         }
 
         private ClassNode ParseClass()
@@ -71,13 +149,15 @@ namespace Mint
 
             // TODO for future versions : handle enums
 
-            TypeNode type = ParseType();
+            TypeNode? type = ParseType();
             string name = Expect(TokenType.Identifier).Value;
 
             // Check whether it's a variable or a function.
             // If we find a '(' then it's a function.
             if (Check(TokenType.OpenParen))
                 return ParseFunction(type, name, line, col);
+            else if (type == null)
+                throw new ParserException(VOID_VARIABLE_MSG, line, col);
             else
                 return ParseVariable(type, name, line, col);
         }
@@ -88,7 +168,7 @@ namespace Mint
             return new VariableNode(type, name, line, col);
         }
 
-        private FunctionNode ParseFunction(TypeNode returnType, string name, int line, int col)
+        private FunctionNode ParseFunction(TypeNode? returnType, string name, int line, int col)
         {
             List<ParamNode> parameters = ParseParameterList();
             BlockNode block = ParseBlock();
@@ -104,7 +184,9 @@ namespace Mint
             {
                 var (line, col) = CurrentPosition;
 
-                TypeNode type = ParseType();
+                TypeNode? type = ParseType();
+                if (type == null)
+                    throw new ParserException(VOID_VARIABLE_MSG, line, col);
                 string name = Expect(TokenType.Identifier).Value;
                 parameters.Add(new ParamNode(type, name, line, col));
 
@@ -115,8 +197,11 @@ namespace Mint
             return parameters;
         }
 
-        private TypeNode ParseType()
+        private TypeNode? ParseType()
         {
+            if (Check(TokenType.Void))
+                return null;
+
             var (line, col) = CurrentPosition;
 
             string name = Current.Type switch
@@ -282,7 +367,9 @@ namespace Mint
         {
             var (line, col) = CurrentPosition;
 
-            TypeNode type = ParseType();
+            TypeNode? type = ParseType();
+            if (type == null)
+                throw new ParserException(VOID_VARIABLE_MSG, line, col);
             string name = Expect(TokenType.Identifier).Value;
             Expect(TokenType.Equals);
             ExprNode initializer = ParseExpression();
@@ -597,16 +684,37 @@ namespace Mint
                 return new StringLiteralNode(_tokens[_pos++].Value, line, col);
 
             // new operator
-            if (Check(TokenType.New))
+            if (Match(TokenType.New))
             {
-                _pos++;
-                TypeNode type = ParseType();
+                TypeNode? type = ParseType();
+                if (type == null)
+                    throw new ParserException("Cannot instantiate new instance of 'void'.", line, col);
 
                 if (type.IsArray || Check(TokenType.OpenBracket))
                 {
+                    // Array can be 'new int[]', 'new int[3]', 'new int[] { 0, 1, 2 }' or 'new int[3] { 0, 1, 2 }'
+
                     Expect(TokenType.OpenBracket);
-                    ExprNode size = ParseExpression();
-                    Expect(TokenType.CloseBracket);
+                    ExprNode? size = null;
+                    if (!Match(TokenType.CloseBracket))
+                    {
+                        size = ParseExpression();
+                        Expect(TokenType.CloseBracket);
+                    }
+
+                    // Initialize array
+                    if (Match(TokenType.OpenBrace))
+                    {
+                        List<ExprNode> inits = new List<ExprNode>();
+                        while (!Match(TokenType.CloseBrace))
+                        {
+                            inits.Add(ParseExpression());
+                            Match(TokenType.Comma);
+                        }
+                        return new ArrayCreationNode(type, size, line, col, inits);
+                    }
+
+                    // No initializer
                     return new ArrayCreationNode(type, size, line, col);
                 }
 
@@ -620,9 +728,8 @@ namespace Mint
                 string name = _tokens[_pos++].Value;
                 // If we find parentheses, that's a function call.
                 // Otherwise it's smth else
-                if (Check(TokenType.OpenParen))
+                if (Match(TokenType.OpenParen))
                 {
-                    _pos++;
                     List<ExprNode> arguments = ParseArgumentsList();
                     Expect(TokenType.CloseParen);
                     return new FunctionCallNode(name, arguments, line, col);
@@ -631,12 +738,33 @@ namespace Mint
             }
 
             // Grouped expression like (x + y)
-            if (Check(TokenType.OpenParen))
+            if (Match(TokenType.OpenParen))
             {
-                _pos++;
                 ExprNode expr = ParseExpression();
                 Expect(TokenType.CloseParen);
                 return expr;
+            }
+
+            if (Match(TokenType.This))
+            {
+                if (Match(TokenType.Dot))
+                {
+                    // we are accessing something from 'this'
+                    string member = Expect(TokenType.Identifier).Value;
+                    if (Match(TokenType.OpenParen))
+                    {
+                        // it's a function
+                        List<ExprNode> args = ParseArgumentsList();
+                        Expect(TokenType.CloseParen);
+                        return new FunctionCallNode(member, args, line, col);
+                    }
+
+                    // it's accessing a variable
+                    return new MemberAccessNode(new ThisNode(line, col), member, line, col);
+                }
+
+                // it's just a lone 'this'
+                return new ThisNode(line, col);
             }
 
             throw new ParserException($"Unexpected token '{Current.Value}'", Current.Line, Current.Column);

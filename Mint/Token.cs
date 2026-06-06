@@ -23,6 +23,9 @@ namespace Mint
         Else,
         While,
         For,
+        XRef,
+        Namespace,
+        This,
 
         // Types, the basic ones (could also be Identifiers, resolve those later)
         Void,

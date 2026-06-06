@@ -11,18 +11,21 @@ namespace Mint
 
         private static readonly Dictionary<string, TokenType> Keywords = new()
         {
-            ["class"]       = TokenType.Class,
-            ["new"]         = TokenType.New,
-            ["return"]      = TokenType.Return,
-            ["if"]          = TokenType.If,
-            ["else"]        = TokenType.Else,
-            ["while"]       = TokenType.While,
-            ["for"]         = TokenType.For,
-            ["void"]        = TokenType.Void,
-            ["int"]         = TokenType.Int,
-            ["float"]       = TokenType.Float,
-            ["bool"]        = TokenType.Bool,
-            ["string"]      = TokenType.String
+            ["class"]     = TokenType.Class,
+            ["new"]       = TokenType.New,
+            ["return"]    = TokenType.Return,
+            ["if"]        = TokenType.If,
+            ["else"]      = TokenType.Else,
+            ["while"]     = TokenType.While,
+            ["for"]       = TokenType.For,
+            ["xref"]  = TokenType.XRef,
+            ["namespace"] = TokenType.Namespace,
+            ["this"]      = TokenType.This,
+            ["void"]      = TokenType.Void,
+            ["int"]       = TokenType.Int,
+            ["float"]     = TokenType.Float,
+            ["bool"]      = TokenType.Bool,
+            ["string"]    = TokenType.String
         };
 
         public Lexer(string source)

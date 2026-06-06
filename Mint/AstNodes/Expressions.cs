@@ -16,6 +16,7 @@ namespace Mint.AstNodes
     public record IdentifierNode(string Name, int Line, int Column) : ExprNode(Line, Column);
     public record MemberAccessNode(ExprNode Object, string Member, int Line, int Column) : ExprNode(Line, Column);
     public record ArrayAccessNode(ExprNode Array, ExprNode Index, int Line, int Column) : ExprNode(Line, Column);
+    public record ThisNode(int Line, int Column): ExprNode(Line, Column);
 
     // Operations
     public record BinaryExprNode(ExprNode Left, string Op, ExprNode Right, int Line, int Column) : ExprNode(Line, Column);
@@ -29,5 +30,8 @@ namespace Mint.AstNodes
         int Column
     ) : ExprNode(Line, Column);
     public record NewObjectNode(string ClassName, int Line, int Column) : ExprNode(Line, Column);
-    public record ArrayCreationNode(TypeNode ElementType, ExprNode Size, int Line, int Column) : ExprNode(Line, Column);
+
+    // size is null if no expression is put between the brackets
+    // if there are initializers, figure out the size from that
+    public record ArrayCreationNode(TypeNode ElementType, ExprNode? Size, int Line, int Column, List<ExprNode>? Initializers = null) : ExprNode(Line, Column);
 }

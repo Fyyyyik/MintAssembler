@@ -14,7 +14,7 @@ namespace Mint.AstNodes
     ) : MemberNode(Line, Column);
 
     public record FunctionNode(
-        TypeNode ReturnType,
+        TypeNode? ReturnType,
         string Name,
         List<ParamNode> Params,
         BlockNode Body,
