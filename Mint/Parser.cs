@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Reflection.Metadata.Ecma335;
 using System.Text;
+using System.Xml.Linq;
 
 namespace Mint
 {
@@ -60,25 +61,19 @@ namespace Mint
             NamespaceNode modNamespace = ParseNamespace();
 
             List<ClassNode> classes = new();
-            List<ExternalVariableNode> extVars = new();
-            List<ExternalFunctionNode> extFunctions = new();
+            List<ClassNode> extClasses = new();
             while (!Check(TokenType.EOF))
                 switch (Current.Type)
                 {
                     case TokenType.XRef:
-                        AstNode extDecl = ParseExternal();
-                        switch (extDecl)
-                        {
-                            case ExternalVariableNode v: extVars.Add(v); break;
-                            case ExternalFunctionNode f: extFunctions.Add(f); break;
-                        }
+                        extClasses.Add(ParseXRef());
                         break;
                     case TokenType.Class:
                         classes.Add(ParseClass());
                         break;
                 }
 
-            return new ModuleNode(modNamespace, classes, extVars, extFunctions, 0, 0);
+            return new ModuleNode(modNamespace, classes, extClasses, 0, 0);
         }
 
         private NamespaceNode ParseNamespace()
@@ -94,36 +89,56 @@ namespace Mint
             return new NamespaceNode(name, line, col);
         }
 
-        private AstNode ParseExternal()
+        private ClassNode ParseXRef()
         {
             var (line, col) = CurrentPosition;
 
             Expect(TokenType.XRef);
+            string className = ReadFullName();
 
-            TypeNode? type = ParseType();
-            string name = ReadFullName();
-            if (Match(TokenType.OpenParen))
+            if (Match(TokenType.OpenBrace))
             {
-                // Function, get the types of the parameters, if any
-                List<TypeNode> paramTypes = new();
-                while (!Match(TokenType.CloseParen))
+                List<MemberNode> members = new();
+                while (!Check(TokenType.CloseBrace) && !Check(TokenType.EOF))
                 {
-                    var (typeLine, typeCol) = CurrentPosition;
+                    var (mLine, mCol) = CurrentPosition;
 
-                    TypeNode? newType = ParseType();
-                    if (newType == null)
-                        throw new ParserException(VOID_VARIABLE_MSG, typeLine, typeCol);
-                    paramTypes.Add(newType);
+                    TypeNode? memberType = ParseType();
+                    string memberName = Expect(TokenType.Identifier).Value;
+
+                    if (Match(TokenType.OpenParen))
+                    {
+                        // Function, get the types of the parameters, if any
+                        List<TypeNode> paramTypes = new();
+                        while (!Match(TokenType.CloseParen))
+                        {
+                            var (typeLine, typeCol) = CurrentPosition;
+
+                            TypeNode? newType = ParseType();
+                            if (newType == null)
+                                throw new ParserException(VOID_VARIABLE_MSG, typeLine, typeCol);
+                            paramTypes.Add(newType);
+                        }
+                        members.Add(new ExternalFunctionNode(memberType, memberName, paramTypes, mLine, mCol));
+                    }
+                    else
+                    {
+                        // Variable
+                        if (memberType == null)
+                            throw new ParserException(VOID_VARIABLE_MSG, line, col);
+
+                        members.Add(new VariableNode(memberType, memberName, mLine, mCol));
+                    }
+
+                    if (!Check(TokenType.CloseBrace))
+                        Expect(TokenType.Comma);
                 }
-                Expect(TokenType.Semicolon);
-                return new ExternalFunctionNode(type, name, paramTypes, line, col);
+                Expect(TokenType.CloseBrace);
+                return new ClassNode(className, members, line, col);
             }
 
-            // Variable
-            if (type == null)
-                throw new ParserException(VOID_VARIABLE_MSG, line, col);
             Expect(TokenType.Semicolon);
-            return new ExternalVariableNode(type, name, line, col);
+            return new ClassNode(className, new List<MemberNode>(), line, col);
         }
 
         private ClassNode ParseClass()
@@ -217,6 +232,8 @@ namespace Mint
                         Current.Line, Current.Column)
             };
             _pos++;
+            while (Match(TokenType.Dot))
+                name += Expect(TokenType.Identifier).Value;
 
             // Check for array suffix []
             bool isArray = false;
@@ -707,13 +724,18 @@ namespace Mint
             {
                 TypeNode? type = ParseType();
                 if (type == null)
-                    throw new ParserException("Cannot instantiate new instance of 'void'.", line, col);
+                    throw new ParserException("Cannot create new instance of 'void'.", line, col);
 
-                if (type.IsArray || Check(TokenType.OpenBracket))
+                if (type.IsArray)
+                    _pos -= 2; // hacky solution
+
+                if (Check(TokenType.OpenBracket))
                 {
                     // Array can be 'new int[]', 'new int[3]', 'new int[] { 0, 1, 2 }' or 'new int[3] { 0, 1, 2 }'
 
-                    Expect(TokenType.OpenBracket);
+                    type = new TypeNode(type.Name, type.Line, type.Column);
+
+                    _pos++;
                     ExprNode? size = null;
                     if (!Match(TokenType.CloseBracket))
                     {
@@ -737,11 +759,15 @@ namespace Mint
                     return new ArrayCreationNode(type, size, line, col);
                 }
 
+                // Trying to create new instance of int, bool, float and string doesn't mean shit
+                if (type.Name is "int" or "float" or "bool" or "string")
+                    throw new ParserException($"Cannot create new instance of '{type.Name}'.", line, col);
+
                 // Object creation doesn't call a constructor so no parentheses and params
                 return new NewObjectNode(type.Name, line, col);
             }
 
-            // Identifier, can be a variable or a call
+            // Identifier, can be a variable or a call or some struct (example : Vector3)
             if (Check(TokenType.Identifier))
             {
                 string name = _tokens[_pos++].Value;

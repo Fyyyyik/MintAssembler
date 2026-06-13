@@ -5,8 +5,7 @@ namespace Mint.Semantics
     public record ModuleSymbol
     {
         public Dictionary<string, ClassSymbol> Classes { get; } = new();
-        public Dictionary<string, ExternalVariableSymbol> XVars { get; } = new();
-        public Dictionary<string, ExternalFunctionSymbol> XFuncs { get; } = new();
+        public Dictionary<string, XRefSymbol> XRefs { get; } = new();
     }
 
     public record ClassSymbol
@@ -16,10 +15,17 @@ namespace Mint.Semantics
         public Dictionary<string, FunctionSymbol> Functions { get; } = new();
     }
 
+    public record XRefSymbol
+    {
+        public required string FullName;
+        public Dictionary<string, VariableSymbol> Variables { get; } = new();
+        public Dictionary<string, ExternalFunctionSymbol> Functions { get; } = new();
+    }
+
     public record VariableSymbol
     {
         public required string Name { get; init; }
-        public required TypeNode? Type { get; init; }
+        public required TypeNode Type { get; init; }
     }
 
     public record FunctionSymbol
@@ -29,15 +35,9 @@ namespace Mint.Semantics
         public List<ParamNode> Parameters { get; } = new();
     }
 
-    public record ExternalVariableSymbol
-    {
-        public required string FullName { get; init; }
-        public required TypeNode? Type { get; init; }
-    }
-
     public record ExternalFunctionSymbol
     {
-        public required string FullName { get; init; }
+        public required string Name { get; init; }
         public TypeNode? ReturnType { get; init; } = null;
         public List<TypeNode> ArgumentTypes { get; } = new();
     }

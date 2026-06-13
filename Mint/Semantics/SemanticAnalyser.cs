@@ -56,23 +56,33 @@ namespace Mint.Semantics
                 _module.Classes[cls.FullName] = clsSymbol;
             }
 
-            foreach (ExternalVariableNode extVar in module.extVariables)
-                _module.XVars[extVar.FullName] = new ExternalVariableSymbol
+            foreach (ClassNode xRef in module.XRefs)
+            {
+                XRefSymbol xRefSymbol = new XRefSymbol
                 {
-                    FullName = extVar.FullName,
-                    Type = extVar.Type
+                    FullName = xRef.FullName
                 };
 
-            foreach (ExternalFunctionNode extFunc in module.extFunctions)
-            {
-                ExternalFunctionSymbol xFuncSymbol = new ExternalFunctionSymbol
-                {
-                    FullName = extFunc.FullName,
-                    ReturnType = extFunc.ReturnType
-                };
-                foreach (TypeNode argType in extFunc.ParamTypes)
-                    xFuncSymbol.ArgumentTypes.Add(argType);
-                _module.XFuncs[extFunc.FullName] = xFuncSymbol;
+                foreach (MemberNode member in xRef.Members)
+                    switch (member)
+                    {
+                        case VariableNode varNode:
+                            xRefSymbol.Variables.Add(
+                                varNode.Name,
+                                new VariableSymbol() { Name = varNode.Name, Type = varNode.Type}
+                            );
+                            break;
+                        case ExternalFunctionNode xFuncNode:
+                            ExternalFunctionSymbol xFuncSbl = new()
+                            {
+                                Name = xFuncNode.Name,
+                                ReturnType = xFuncNode.ReturnType
+                            };
+                            foreach (TypeNode paramType in xFuncNode.ParamTypes)
+                                xFuncSbl.ArgumentTypes.Add(paramType);
+                            xRefSymbol.Functions.Add(xFuncNode.Name, xFuncSbl);
+                            break;
+                    }
             }
         }
 
@@ -85,8 +95,6 @@ namespace Mint.Semantics
             foreach (MemberNode member in cls.Members)
                 switch (member)
                 {
-                    // we already built the symbol table, do nothing if it's a variable
-
                     case FunctionNode function:
                         AnalyseFunction(function);
                         break;
@@ -119,6 +127,12 @@ namespace Mint.Semantics
             switch (stmt)
             {
                 case VarDeclNode varDecl:
+                    // Check if the name is proper
+                    if (_module.Classes.ContainsKey(varDecl.Name))
+                    {
+                        AddError("Expected a name that's not a class.", varDecl);
+                        break;
+                    }
                     TypeNode? initType = AnalyseExpr(varDecl.Initializer);
                     if (!TypesMatch(varDecl.Type, initType))
                         AddError(
@@ -127,7 +141,14 @@ namespace Mint.Semantics
                         );
                     _scopeStack.Define(varDecl.Name, varDecl.Type);
                     break;
+
                 case AssignNode assign:
+                    // First catch if we're trying to assign to a class
+                    if (_module.Classes.ContainsKey(assign.Name))
+                    {
+                        AddError("Cannot assign to a class.", assign);
+                        break;
+                    }
                     TypeNode? assignType = AnalyseExpr(assign.Value);
                     TypeNode? varType = ResolveIdentifierType(assign.Name, assign);
                     if (!TypesMatch(assignType, varType))
@@ -136,6 +157,7 @@ namespace Mint.Semantics
                             assign
                         );
                     break;
+
                 case ArrayAssignNode arrayAssign:
                     TypeNode? arrayType = AnalyseExpr(arrayAssign.Array);
                     TypeNode? indexType = AnalyseExpr(arrayAssign.Index);
@@ -150,6 +172,7 @@ namespace Mint.Semantics
                             arrayAssign
                         );
                     break;
+
                 case IfNode ifStmt:
                     TypeNode? condType = AnalyseExpr(ifStmt.Condition);
                     if (condType?.Name != "bool")
@@ -158,12 +181,14 @@ namespace Mint.Semantics
                     if (ifStmt.Else != null)
                         AnalyseBlock(ifStmt.Else);
                     break;
+
                 case WhileNode whileStmt:
                     TypeNode? whileCondType = AnalyseExpr(whileStmt.Condition);
                     if (whileCondType?.Name != "bool")
                         AddError("While condition must be a bool", whileStmt);
                     AnalyseBlock(whileStmt.Body);
                     break;
+
                 case ForNode forStmt:
                     _scopeStack.PushScope();
                     AnalyseStatement(forStmt.Initializer);
@@ -174,17 +199,20 @@ namespace Mint.Semantics
                     AnalyseBlock(forStmt.Body);
                     _scopeStack.PopScope();
                     break;
+
                 case ReturnNode ret:
                     TypeNode? retType = ret.Value != null ? AnalyseExpr(ret.Value) : null;
                     if (!TypesMatch(retType, _currentFunction?.ReturnType))
                         AddError(
-                            $"Return type '{retType?.Name}' does not match function return type '{_currentFunction?.ReturnType.Name}'",
+                            $"Return type '{retType?.Name}' does not match function return type '{_currentFunction?.ReturnType?.Name}'",
                             ret
                         );
                     break;
+
                 case ExprStmtNode exprStmt:
                     AnalyseExpr(exprStmt.Expr);
                     break;
+
                 case IncrementNode inc:
                     if (ResolveIdentifierType(inc.Name, inc)?.Name != "int")
                         AddError($"Cannot increment/decrement non-int variable '{inc.Name}'", inc);
@@ -202,12 +230,16 @@ namespace Mint.Semantics
                 StringLiteralNode _ => new TypeNode("string", expr.Line, expr.Column),
 
                 IdentifierNode id => ResolveIdentifierType(id.Name, id),
+                QualifiedAccessNode qa => ResolveQualifiedAccessType(qa),
                 MemberAccessNode ma => ResolveMemberAccessType(ma),
                 ArrayAccessNode aa => ResolveArrayAccessType(aa),
+                ThisNode ts => ResolveThisType(ts),
                 BinaryExprNode be => ResolveBinaryExprType(be),
                 UnaryExprNode ue => ResolveUnaryExprType(ue),
-                FunctionCallNode fc => ResolveFunctionCallType(fc),
-                ArrayCreationNode ac => ResolveA
+                QualifiedCallNode qc => ResolveQualifiedCallType(qc),
+                MemberCallNode mc => ResolveMemberCallType(mc),
+                NewObjectNode no => ResolveNewObjectType(no),
+                ArrayCreationNode ac => ResolveArrayCreationType(ac),
                 // TODO : add more types of expressions for versions with oop
 
                 _ => null
@@ -223,25 +255,92 @@ namespace Mint.Semantics
         {
             // In this house we refer to class variables with 'this' prefixed.
             // A single identifier is referring to a local variable.
-            return _scopeStack.LookUp(name);
+            // It could also mean we're pushing an instance (sppsh and sppshz)
+            TypeNode? type = _scopeStack.LookUp(name);
+            if (type != null)
+                return type;
+            if (_module.Classes.ContainsKey(name))
+                return new TypeNode(name, context.Line, context.Column);
+
+            // ok i unno wth this is
+            return null;
+        }
+
+        private TypeNode? ResolveQualifiedAccessType(QualifiedAccessNode qualifiedAccess)
+        {
+            // Here we get something like 'Identifier.Identifier.Identifier'
+            // Have to figure out if it's a static variable from some xref
+            // Or it could be just accessing a variable from an object (not in 0.2)
+
+            string[] names = qualifiedAccess.FullName.Split('.');
+            string leadup = string.Join('.', names[..^1]); // Could be a class name or a member chain
+            string varName = names[^1];
+
+            // Check in xrefs
+            if (_module.XRefs.TryGetValue(leadup, out XRefSymbol? xrefCls))
+                if (xrefCls.Variables.TryGetValue(varName, out VariableSymbol? xrefVar))
+                    return xrefVar.Type;
+
+            // Walk the member chain until we reach the final access
+            TypeNode? type = null;
+
+            // The first name can be the name of a class and the next one a static field (don't care in 0.2 so TODO)
+            if (_module.Classes.ContainsKey(names[0]))
+                type = new TypeNode(names[0], qualifiedAccess.Line, qualifiedAccess.Column);
+            else type = _scopeStack.LookUp(names[0]); // Probably a local variable starter
+
+            if (type != null)
+            {
+                for (int i = 1; i < names.Length; i++)
+                {
+                    if (!_module.Classes.TryGetValue(type.Name, out ClassSymbol? cls))
+                    {
+                        AddError($"'{type.Name}' is not a known class.", qualifiedAccess);
+                        return null;
+                    }
+                    if (!cls.Variables.TryGetValue(names[i], out VariableSymbol? varSbl))
+                    {
+                        AddError($"Class '{cls.Name}' does not have a variable with the name '{names[i]}'.", qualifiedAccess);
+                        return null;
+                    }
+                    type = varSbl.Type;
+                }
+                return type;
+            }
+
+            AddError($"Cannot resolve '{qualifiedAccess.FullName}'.", qualifiedAccess);
+            return null;
         }
 
         private TypeNode? ResolveMemberAccessType(MemberAccessNode memberAccess)
         {
             TypeNode? objType = AnalyseExpr(memberAccess.Object);
-            if (objType == null) return null;
+            if (objType == null)
+            {
+                AddError("Can't access member from 'void' type.", memberAccess);
+                return null;
+            }
 
             // Array length property
             if (objType.IsArray && memberAccess.Member == "Length")
                 return new TypeNode("int", memberAccess.Line, memberAccess.Column);
 
-            // Find it in the class
+            // Find it in the classes (or xrefs)
             if (_module.Classes.TryGetValue(objType.Name, out ClassSymbol? cls))
             {
                 if (cls.Variables.TryGetValue(memberAccess.Member, out VariableSymbol? varSbl))
                     return varSbl.Type;
 
-                AddError($"'{objType.Name}' has no variable '{memberAccess.Member}'. Did you forget to reference it with the 'xref' keyword ?", memberAccess);
+                AddError($"'{objType.Name}' has no member '{memberAccess.Member}'.", memberAccess);
+                return null;
+            }
+
+            if (_module.XRefs.TryGetValue(objType.Name, out XRefSymbol? xrefCls))
+            {
+                if (xrefCls.Variables.TryGetValue(memberAccess.Member, out VariableSymbol? xrefVar))
+                    return xrefVar.Type;
+
+                AddError($"'{objType.Name}' has no member '{memberAccess.Member}'. Did you forget to reference it in the xref ?", memberAccess);
                 return null;
             }
 
@@ -264,6 +363,16 @@ namespace Mint.Semantics
             }
 
             return new TypeNode(arrayType.Name, arrayAccess.Line, arrayAccess.Column, true);
+        }
+
+        private TypeNode? ResolveThisType(ThisNode ts)
+        {
+            if (_currentClass == null)
+            {
+                AddError("Cannot use keyword 'this' outside of a class.", ts);
+                return null;
+            }
+            return new TypeNode(_currentClass.Name, ts.Line, ts.Column);
         }
 
         private TypeNode? ResolveBinaryExprType(BinaryExprNode binaryExpr)
@@ -311,6 +420,125 @@ namespace Mint.Semantics
             return operand;
         }
 
+        private TypeNode? ResolveQualifiedCallType(QualifiedCallNode qualifiedCall)
+        {
+            string[] names = qualifiedCall.FullName.Split('.');
+            string leadup = string.Join('.', names[..^1]);
+            string funcName = names[^1];
+
+            if (_module.XRefs.TryGetValue(leadup, out XRefSymbol? xrefCls))
+                if (xrefCls.Functions.TryGetValue(funcName, out ExternalFunctionSymbol? xrefFunc))
+                {
+                    CheckArguments(xrefFunc.ArgumentTypes, qualifiedCall.Args, qualifiedCall, funcName);
+                    return xrefFunc.ReturnType;
+                }
+
+            TypeNode? type = null;
+            if (_module.Classes.ContainsKey(names[0]))
+                type = new TypeNode(names[0], qualifiedCall.Line, qualifiedCall.Column);
+            else type = _scopeStack.LookUp(names[0]);
+
+            if (type == null)
+            {
+                AddError($"Cannot resolve '{qualifiedCall.FullName}'.", qualifiedCall);
+                return null;
+            }
+
+            // Walk the member chain like with a variable but this time stop before the
+            // last name since we're actually checking for a function name.
+            for (int i = 1; i < names.Length - 1; i++)
+            {
+                if (!_module.Classes.TryGetValue(type.Name, out ClassSymbol? cls))
+                {
+                    AddError($"'{type.Name}' is not a known class.", qualifiedCall);
+                    return null;
+                }
+                if (!cls.Variables.TryGetValue(names[i], out VariableSymbol? varSbl))
+                {
+                    AddError($"Class '{cls.Name}' does not have a variable with the name '{names[i]}'.", qualifiedCall);
+                    return null;
+                }
+                type = varSbl.Type;
+            }
+
+            if (!_module.Classes.TryGetValue(type.Name, out ClassSymbol? clsWithFunc))
+            {
+                AddError($"'{type.Name}' is not a known class.", qualifiedCall);
+                return null;
+            }
+            if (!clsWithFunc.Functions.TryGetValue(funcName, out FunctionSymbol? funcSbl))
+            {
+                AddError($"Class '{clsWithFunc.Name}' does not have a function with the name '{funcName}'.", qualifiedCall);
+                return null;
+            }
+
+            CheckArguments(ToTypeNodes(funcSbl.Parameters), qualifiedCall.Args, qualifiedCall, funcName);
+            return funcSbl.ReturnType;
+        }
+
+        private TypeNode? ResolveMemberCallType(MemberCallNode memberCall)
+        {
+            TypeNode? objType = AnalyseExpr(memberCall.Object);
+            if (objType == null)
+            {
+                AddError("Can't call function from 'void' type.", memberCall);
+                return null;
+            }
+
+            if (_module.Classes.TryGetValue(objType.Name, out ClassSymbol? cls))
+            {
+                if (cls.Functions.TryGetValue(memberCall.Name, out FunctionSymbol? funcSbl))
+                {
+                    CheckArguments(ToTypeNodes(funcSbl.Parameters), memberCall.Args, memberCall, memberCall.Name);
+                    return funcSbl.ReturnType;
+                }
+
+                AddError($"Class '{cls.Name}' does not have a function with the name '{memberCall.Name}'.", memberCall);
+                return null;
+            }
+
+            if (_module.XRefs.TryGetValue(objType.Name, out XRefSymbol? xrefCls))
+            {
+                if (xrefCls.Functions.TryGetValue(memberCall.Name, out ExternalFunctionSymbol? xrefFunc))
+                {
+                    CheckArguments(xrefFunc.ArgumentTypes, memberCall.Args, memberCall, memberCall.Name);
+                    return xrefFunc.ReturnType;
+                }
+
+                AddError($"XRef class '{xrefCls.FullName}' does not have a function with the name '{memberCall.Name}'.", memberCall);
+                return null;
+            }
+
+            AddError($"'{objType.Name}' is not a known class. Did you forget to reference it with the 'xref' keyword ?", memberCall);
+            return null;
+        }
+
+        private TypeNode? ResolveNewObjectType(NewObjectNode newObject)
+        {
+            return new TypeNode(newObject.ClassName, newObject.Line, newObject.Column);
+        }
+
+        private TypeNode? ResolveArrayCreationType(ArrayCreationNode arrayCreation)
+        {
+            return new TypeNode(arrayCreation.ElementType.Name, arrayCreation.Line, arrayCreation.Column, true);
+        }
+
+        private void CheckArguments(IList<TypeNode> expectedTypes, IList<ExprNode> arguments, AstNode context, string funcName)
+        {
+            if (expectedTypes.Count != arguments.Count)
+            {
+                AddError($"Expected {expectedTypes.Count} arguments but got {arguments.Count} instead.", context);
+                return;
+            }
+
+            for (int i = 0; i < expectedTypes.Count; i++)
+            {
+                TypeNode? argType = AnalyseExpr(arguments[i]);
+                if (!TypesMatch(expectedTypes[i], argType))
+                    AddError($"Argument {i + 1} of {funcName} expects '{expectedTypes[i].Name}' but got '{argType?.Name}'.", context);
+            }
+        }
+
         private static bool TypesMatch(TypeNode? a,  TypeNode? b)
         {
             if (a == null || b == null) return false;
@@ -319,5 +547,13 @@ namespace Mint.Semantics
 
         private void AddError(string message, AstNode node)
             => _errors.Add(new SemanticError(message, node));
+
+        private static TypeNode[] ToTypeNodes(IList<ParamNode> paramNodes)
+        {
+            List<TypeNode> typeNodes = new();
+            foreach (ParamNode param in paramNodes)
+                typeNodes.Add(param.Type);
+            return typeNodes.ToArray();
+        }
     }
 }
