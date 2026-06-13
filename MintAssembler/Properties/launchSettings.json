@@ -2,7 +2,7 @@
   "profiles": {
     "MintAssembler": {
       "commandName": "Project",
-      "commandLineArgs": "compile \"C:\\Users\\maxim\\source\\repos\\MintAssembler\\MyMint.mint\""
+      "commandLineArgs": "compile 0.2.mint --verbose"
     }
   }
 }

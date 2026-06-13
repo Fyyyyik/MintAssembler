@@ -83,6 +83,7 @@ namespace Mint.Semantics
                             xRefSymbol.Functions.Add(xFuncNode.Name, xFuncSbl);
                             break;
                     }
+                _module.XRefs[xRef.FullName] = xRefSymbol;
             }
         }
 
@@ -203,6 +204,8 @@ namespace Mint.Semantics
                     break;
 
                 case ReturnNode ret:
+                    if (_currentFunction?.ReturnType == null)
+                        break;
                     TypeNode? retType = ret.Value != null ? AnalyseExpr(ret.Value) : null;
                     if (!TypesMatch(retType, _currentFunction?.ReturnType))
                         AddError(

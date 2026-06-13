@@ -15,4 +15,10 @@
     <ProjectReference Include="..\Mint\Mint.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Update="0.2.mint">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
 </Project>
