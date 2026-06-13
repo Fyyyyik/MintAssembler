@@ -178,6 +178,8 @@ namespace Mint.Semantics
                     if (condType?.Name != "bool")
                         AddError("If condition must be a bool", ifStmt);
                     AnalyseBlock(ifStmt.Then);
+                    if (ifStmt.ElseIf != null)
+                        AnalyseStatement(ifStmt.ElseIf);
                     if (ifStmt.Else != null)
                         AnalyseBlock(ifStmt.Else);
                     break;

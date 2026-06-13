@@ -214,7 +214,7 @@ namespace Mint
 
         private TypeNode? ParseType()
         {
-            if (Check(TokenType.Void))
+            if (Match(TokenType.Void))
                 return null;
 
             var (line, col) = CurrentPosition;
@@ -330,9 +330,14 @@ namespace Mint
 
             BlockNode? els = null;
             if (Match(TokenType.Else))
-                els = ParseBlock();
+            {
+                if (Check(TokenType.If))
+                    return new IfNode(condition, then, ParseIf(), null, line, col);
 
-            return new IfNode(condition, then, els, line, col);
+                return new IfNode(condition, then, null, ParseBlock(), line, col);
+            }
+
+            return new IfNode(condition, then, null, null, line, col);
         }
 
         private WhileNode ParseWhile()
@@ -670,7 +675,7 @@ namespace Mint
                     StringBuilder fullName = new(ident.Name);
 
                     while (Match(TokenType.Dot))
-                        fullName.Append(Expect(TokenType.Identifier).Value);
+                        fullName.Append("." + Expect(TokenType.Identifier).Value);
 
                     if (Match(TokenType.OpenParen))
                     {

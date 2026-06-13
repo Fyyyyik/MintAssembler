@@ -34,6 +34,7 @@ namespace Mint.AstNodes
     public record IfNode(
         ExprNode Condition,
         BlockNode Then,
+        IfNode? ElseIf,
         BlockNode? Else,
         int Line,
         int Column

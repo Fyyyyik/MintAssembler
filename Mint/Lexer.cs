@@ -99,7 +99,7 @@ namespace Mint
         {
             StringBuilder sb = new();
 
-            if (Current == '0' && Peek == 'x')
+            if (Current == '0' && Current == 'x')
             {
                 // Hex value, always assume it's an int
                 sb.Append(Advance());
@@ -190,7 +190,7 @@ namespace Mint
             switch (ch)
             {
                 case '+':
-                    switch (Peek)
+                    switch (Current)
                     {
                         case '=':
                             Advance();
@@ -201,7 +201,7 @@ namespace Mint
                     }
                     return new Token(TokenType.Plus, "+", line, col);
                 case '-':
-                    switch (Peek)
+                    switch (Current)
                     {
                         case '=':
                             Advance();
@@ -212,21 +212,21 @@ namespace Mint
                     }
                     return new Token(TokenType.Minus, "-", line, col);
                 case '*':
-                    if (Peek == '=')
+                    if (Current == '=')
                     {
                         Advance();
                         return new Token(TokenType.StarEquals, "*=", line, col);
                     }
                     return new Token(TokenType.Star, "*", line, col);
                 case '/':
-                    if (Peek == '=')
+                    if (Current == '=')
                     {
                         Advance();
                         return new Token(TokenType.SlashEquals, "/=", line, col);
                     }
                     return new Token(TokenType.Slash, "/", line, col);
                 case '%':
-                    if (Peek == '=')
+                    if (Current == '=')
                     {
                         Advance();
                         return new Token(TokenType.PercentEquals, "%=", line, col);
@@ -253,28 +253,28 @@ namespace Mint
                 case ']':
                     return new Token(TokenType.CloseBracket, "]", line, col);
                 case '=':
-                    if (Peek == '=')
+                    if (Current == '=')
                     {
                         Advance();
                         return new Token(TokenType.DoubleEquals, "==", line, col);
                     }
                     return new Token(TokenType.Equals, "=", line, col);
                 case '!':
-                    if (Peek == '=')
+                    if (Current == '=')
                     {
                         Advance();
                         return new Token(TokenType.NotEqual, "!=", line, col);
                     }
                     return new Token(TokenType.Not, "!", line, col);
                 case '>':
-                    switch (Peek)
+                    switch (Current)
                     {
                         case '=':
                             Advance();
                             return new Token(TokenType.GreaterEquals, ">=", line, col);
                         case '>':
                             Advance();
-                            if (Peek == '=')
+                            if (Current == '=')
                             {
                                 Advance();
                                 return new Token(TokenType.DoubleGreaterEquals, ">>=", line, col);
@@ -283,14 +283,14 @@ namespace Mint
                     }
                     return new Token(TokenType.Greater, ">", line, col);
                 case '<':
-                    switch (Peek)
+                    switch (Current)
                     {
                         case '=':
                             Advance();
                             return new Token(TokenType.LesserEquals, "<=", line, col);
                         case '<':
                             Advance();
-                            if (Peek == '=')
+                            if (Current == '=')
                             {
                                 Advance();
                                 return new Token(TokenType.DoubleLessEquals, "<<=", line, col);
@@ -299,7 +299,7 @@ namespace Mint
                     }
                     return new Token(TokenType.Lesser, "<", line, col);
                 case '&':
-                    switch (Peek)
+                    switch (Current)
                     {
                         case '=':
                             Advance();
@@ -310,7 +310,7 @@ namespace Mint
                     }
                     return new Token(TokenType.Ampersand, "&", line, col);
                 case '|':
-                    switch (Peek)
+                    switch (Current)
                     {
                         case '=':
                             Advance();
@@ -321,7 +321,7 @@ namespace Mint
                     }
                     return new Token(TokenType.Pipe, "|", line, col);
                 case '^':
-                    if (Peek == '=')
+                    if (Current == '=')
                     {
                         Advance();
                         return new Token(TokenType.CaretEquals, "^=", line, col);

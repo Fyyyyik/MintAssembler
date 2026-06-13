@@ -2,6 +2,7 @@
   <Folder Name="/Test/">
     <File Path="MyMint.mint" />
   </Folder>
+  <Project Path="Mint-Tests/Mint-Tests.csproj" Id="bf7e12de-43b7-41f6-a94e-58bfa11a3326" />
   <Project Path="Mint/Mint.csproj" />
   <Project Path="MintAssembler/MintAssembler.csproj" Id="39032d49-160c-468a-9064-eccaa5581ccc" />
 </Solution>
