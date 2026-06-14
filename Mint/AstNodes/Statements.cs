@@ -17,15 +17,7 @@ namespace Mint.AstNodes
     ) : StmtNode(Line, Column);
 
     public record AssignNode(
-        string Name,
-        ExprNode Value,
-        int Line,
-        int Column
-    ) : StmtNode(Line, Column);
-
-    public record ArrayAssignNode(
-        ExprNode Array,
-        ExprNode Index,
+        ExprNode Target,
         ExprNode Value,
         int Line,
         int Column
@@ -59,13 +51,6 @@ namespace Mint.AstNodes
     public record ReturnNode(ExprNode? Value, int Line, int Column) : StmtNode(Line, Column);
 
     public record ExprStmtNode(ExprNode Expr, int Line, int Column) : StmtNode(Line, Column);
-
-    public record QualifiedAssignNode(
-        string FullName,
-        ExprNode Value,
-        int Line,
-        int Column
-    ) : StmtNode(Line, Column);
 
     public record IncrementNode(string Name, bool IsPrefix, bool IsIncrement, int Line, int Column) : StmtNode(Line, Column);
 }

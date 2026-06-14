@@ -144,33 +144,18 @@ namespace Mint.Semantics
                     break;
 
                 case AssignNode assign:
-                    // First catch if we're trying to assign to a class
-                    if (_module.Objects.ContainsKey(assign.Name))
+                    // First catch if we're trying to assign to something that can't be assigned to
+                    if (!(assign.Target is IdentifierNode or QualifiedAccessNode or MemberAccessNode or ArrayAccessNode))
                     {
-                        AddError("Cannot assign to an object.", assign);
+                        AddError("Assignement is not allowed.", assign);
                         break;
                     }
                     TypeNode? assignType = AnalyseExpr(assign.Value);
-                    TypeNode? varType = ResolveIdentifierType(assign.Name, assign);
-                    if (!TypesMatch(assignType, varType))
+                    TypeNode? targetType = AnalyseExpr(assign.Target);
+                    if (!TypesMatch(assignType, targetType))
                         AddError(
-                            $"Cannot assign '{assignType?.Name}' to '{assign.Name}' of type '{varType?.Name}'",
+                            $"Cannot assign '{assignType?.Name}' to variable of type '{targetType?.Name}'",
                             assign
-                        );
-                    break;
-
-                case ArrayAssignNode arrayAssign:
-                    TypeNode? arrayType = AnalyseExpr(arrayAssign.Array);
-                    TypeNode? indexType = AnalyseExpr(arrayAssign.Index);
-                    TypeNode? valueType = AnalyseExpr(arrayAssign.Value);
-                    if (indexType?.Name != "int")
-                        AddError("Array index must be an int", arrayAssign);
-                    if (arrayType != null &&
-                        !TypesMatch(valueType, new TypeNode(arrayType.Name, arrayType.Line, arrayType.Column))
-                    )
-                        AddError(
-                            $"Cannot assign '{valueType?.Name}' to array of type '{arrayType.Name}'",
-                            arrayAssign
                         );
                     break;
 

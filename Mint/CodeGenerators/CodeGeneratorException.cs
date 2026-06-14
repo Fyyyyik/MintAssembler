@@ -7,10 +7,14 @@ namespace Mint.CodeGenerators
 {
     public class CodeGeneratorException : Exception
     {
-        public AstNode Context;
+        public int Line;
+        public int Column;
 
-        public CodeGeneratorException(string message, AstNode context)
-            : base($"Code generator error with context {context} : {message}")
-            => Context = context;
+        public CodeGeneratorException(string message, int line, int column)
+            : base($"Code generator error at line {line} column {column} : {message}")
+        {
+            Line = line;
+            Column = column;
+        }
     }
 }

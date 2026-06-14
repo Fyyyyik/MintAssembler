@@ -282,10 +282,6 @@ namespace Mint
             if (IsVarDecl())
                 return ParseVarDecl();
 
-            // Array assignement
-            if (IsArrayAssign())
-                return ParseArrayAssign();
-
             return ParseAssignOrExpr();
         }
 
@@ -309,13 +305,6 @@ namespace Mint
                 return true;
 
             return false;
-        }
-
-        private bool IsArrayAssign()
-        {
-            // check for shit like "arr[i] = value"
-            return Check(TokenType.Identifier)
-                && Peek().Type == TokenType.OpenBracket;
         }
 
         private IfNode ParseIf()
@@ -399,19 +388,6 @@ namespace Mint
             return new VarDeclNode(type, name, initializer, line, col);
         }
 
-        private ArrayAssignNode ParseArrayAssign()
-        {
-            var (line, col) = CurrentPosition;
-            IdentifierNode array = new(Expect(TokenType.Identifier).Value, line, col);
-            Expect(TokenType.OpenBracket);
-            ExprNode index = ParseExpression();
-            Expect(TokenType.CloseBracket);
-            Expect(TokenType.Equals);
-            ExprNode value = ParseExpression();
-            Expect(TokenType.Semicolon);
-            return new ArrayAssignNode(array, index, value, line, col);
-        }
-
         private StmtNode ParseAssignOrExpr(bool expectSemicolon = true)
         {
             var (line, col) = CurrentPosition;
@@ -438,17 +414,17 @@ namespace Mint
                 return new IncrementNode(postfixIdent.Name, false, isIncrement, line, col);
             }
             
-            // If the expression is an identifier followed by = it's an assignement
-            if (expr is IdentifierNode ident && Check(TokenType.Equals))
+            // Equals means assign
+            if (Check(TokenType.Equals))
             {
                 _pos++; // consume =
                 ExprNode value = ParseExpression();
                 if (expectSemicolon) Expect(TokenType.Semicolon);
-                return new AssignNode(ident.Name, value, line, col);
+                return new AssignNode(expr, value, line, col);
             }
 
             // Compound assignements like x += 5
-            if (expr is IdentifierNode identCompound && IsCompoundAssign())
+            if (IsCompoundAssign())
             {
                 string op = Current.Type switch
                 {
@@ -469,25 +445,16 @@ namespace Mint
                 if (expectSemicolon) Expect(TokenType.Semicolon);
 
                 BinaryExprNode desugared = new(
-                    new IdentifierNode(identCompound.Name, line, col),
+                    expr,
                     op,
                     value,
                     line,
                     col
                 );
-                return new AssignNode(identCompound.Name, desugared, line, col);
+                return new AssignNode(expr, desugared, line, col);
             }
 
-            // Member assignements like instance.foo = 5
-            if (expr is QualifiedAccessNode qa && Check(TokenType.Equals))
-            {
-                _pos++;
-                ExprNode value = ParseExpression();
-                if (expectSemicolon) Expect(TokenType.Semicolon);
-                return new QualifiedAssignNode(qa.FullName, value, line, col);
-            }
-
-            // Otherwise it's just an expression like Foo();
+            // Otherwise it's just a standalone expression
             if (expectSemicolon) Expect(TokenType.Semicolon);
             return new ExprStmtNode(expr, line, col);
         }
