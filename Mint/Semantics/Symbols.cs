@@ -4,11 +4,13 @@ namespace Mint.Semantics
 {
     public record ModuleSymbol
     {
-        public Dictionary<string, ClassSymbol> Classes { get; } = new();
+        public Dictionary<string, ObjectSymbol> Objects { get; } = new();
         public Dictionary<string, XRefSymbol> XRefs { get; } = new();
     }
 
-    public record ClassSymbol
+    public abstract record ObjectSymbol;
+
+    public record ClassSymbol : ObjectSymbol
     {
         public required string Name;
         public Dictionary<string, VariableSymbol> Variables { get; } = new();

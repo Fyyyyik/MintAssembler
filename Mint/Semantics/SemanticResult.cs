@@ -6,7 +6,7 @@ using System.Text;
 namespace Mint.Semantics
 {
     public record SemanticResult(
-        ModuleSymbol Program,
+        ModuleSymbol Module,
         Dictionary<ExprNode, TypeNode> ExprTypes,
         IReadOnlyList<SemanticError> Errors
     );

@@ -6,8 +6,8 @@ namespace Mint.AstNodes
 {
     public record ModuleNode(
         NamespaceNode Namespace,
-        List<ClassNode> Classes,
-        List<ClassNode> XRefs,
+        List<ObjectNode> Objects,
+        List<ObjectNode> XRefs,
         int Line,
         int Column
     ) : AstNode(Line, Column);

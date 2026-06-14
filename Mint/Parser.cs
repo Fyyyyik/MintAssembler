@@ -60,20 +60,20 @@ namespace Mint
         {
             NamespaceNode modNamespace = ParseNamespace();
 
-            List<ClassNode> classes = new();
-            List<ClassNode> extClasses = new();
+            List<ObjectNode> objects = new();
+            List<ObjectNode> xrefs = new();
             while (!Check(TokenType.EOF))
                 switch (Current.Type)
                 {
                     case TokenType.XRef:
-                        extClasses.Add(ParseXRef());
+                        xrefs.Add(ParseXRef());
                         break;
                     case TokenType.Class:
-                        classes.Add(ParseClass());
+                        objects.Add(ParseClass());
                         break;
                 }
 
-            return new ModuleNode(modNamespace, classes, extClasses, 0, 0);
+            return new ModuleNode(modNamespace, objects, xrefs, 0, 0);
         }
 
         private NamespaceNode ParseNamespace()
@@ -89,7 +89,7 @@ namespace Mint
             return new NamespaceNode(name, line, col);
         }
 
-        private ClassNode ParseXRef()
+        private ObjectNode ParseXRef()
         {
             var (line, col) = CurrentPosition;
 

@@ -20,40 +20,45 @@ namespace Mint.Semantics
             BuildSymbolTable(module);
 
             // Pass 2 - type checking
-            foreach (ClassNode cls in module.Classes)
-                AnalyseClass(cls);
+            foreach (ObjectNode obj in module.Objects)
+                AnalyseObject(obj);
 
             return new SemanticResult(_module, _exprTypes, _errors);
         }
 
         private void BuildSymbolTable(ModuleNode module)
         {
-            foreach (ClassNode cls in module.Classes)
+            foreach (ObjectNode obj in module.Objects)
             {
-                ClassSymbol clsSymbol = new ClassSymbol
+                switch (obj)
                 {
-                    Name = cls.FullName
-                };
+                    case ClassNode cls:
+                        ClassSymbol clsSymbol = new ClassSymbol
+                        {
+                            Name = cls.FullName
+                        };
 
-                foreach (MemberNode member in cls.Members)
-                    switch (member)
-                    {
-                        case VariableNode variable:
-                            clsSymbol.Variables[variable.Name] = new VariableSymbol
+                        foreach (MemberNode member in cls.Members)
+                            switch (member)
                             {
-                                Name = variable.Name,
-                                Type = variable.Type
-                            };
-                            break;
-                        case FunctionNode function:
-                            clsSymbol.Functions[function.Name] = new FunctionSymbol
-                            {
-                                Name = function.Name,
-                                ReturnType = function.ReturnType
-                            };
-                            break;
-                    }
-                _module.Classes[cls.FullName] = clsSymbol;
+                                case VariableNode variable:
+                                    clsSymbol.Variables[variable.Name] = new VariableSymbol
+                                    {
+                                        Name = variable.Name,
+                                        Type = variable.Type
+                                    };
+                                    break;
+                                case FunctionNode function:
+                                    clsSymbol.Functions[function.Name] = new FunctionSymbol
+                                    {
+                                        Name = function.Name,
+                                        ReturnType = function.ReturnType
+                                    };
+                                    break;
+                            }
+                        _module.Objects[cls.FullName] = clsSymbol;
+                        break;
+                }
             }
 
             foreach (ClassNode xRef in module.XRefs)
@@ -87,9 +92,19 @@ namespace Mint.Semantics
             }
         }
 
+        private void AnalyseObject(ObjectNode obj)
+        {
+            switch (obj)
+            {
+                case ClassNode cls:
+                    AnalyseClass(cls);
+                    break;
+            }
+        }
+
         private void AnalyseClass(ClassNode cls)
         {
-            _currentClass = _module.Classes[cls.FullName];
+            _currentClass = _module.Objects[cls.FullName];
 
             // TODO : add check for base class
 
