@@ -8,7 +8,7 @@ namespace Mint.Semantics
         private readonly Dictionary<ExprNode, TypeNode> _exprTypes = new();
         private readonly List<SemanticError> _errors = new();
         private ModuleSymbol _module = new();
-        private ClassSymbol? _currentClass;
+        private ObjectSymbol? _currentClass;
         private FunctionSymbol? _currentFunction;
         private readonly ScopeStack _scopeStack = new();
 
@@ -30,42 +30,37 @@ namespace Mint.Semantics
         {
             foreach (ObjectNode obj in module.Objects)
             {
-                switch (obj)
+                ObjectSymbol objSymbol = new ObjectSymbol
                 {
-                    case ClassNode cls:
-                        ClassSymbol clsSymbol = new ClassSymbol
-                        {
-                            Name = cls.FullName
-                        };
+                    Name = obj.Name
+                };
 
-                        foreach (MemberNode member in cls.Members)
-                            switch (member)
+                foreach (MemberNode member in obj.Members)
+                    switch (member)
+                    {
+                        case VariableNode variable:
+                            objSymbol.Variables[variable.Name] = new VariableSymbol
                             {
-                                case VariableNode variable:
-                                    clsSymbol.Variables[variable.Name] = new VariableSymbol
-                                    {
-                                        Name = variable.Name,
-                                        Type = variable.Type
-                                    };
-                                    break;
-                                case FunctionNode function:
-                                    clsSymbol.Functions[function.Name] = new FunctionSymbol
-                                    {
-                                        Name = function.Name,
-                                        ReturnType = function.ReturnType
-                                    };
-                                    break;
-                            }
-                        _module.Objects[cls.FullName] = clsSymbol;
-                        break;
-                }
+                                Name = variable.Name,
+                                Type = variable.Type
+                            };
+                            break;
+                        case FunctionNode function:
+                            objSymbol.Functions[function.Name] = new FunctionSymbol
+                            {
+                                Name = function.Name,
+                                ReturnType = function.ReturnType
+                            };
+                            break;
+                    }
+                _module.Objects[obj.Name] = objSymbol;
             }
 
-            foreach (ClassNode xRef in module.XRefs)
+            foreach (ObjectNode xRef in module.XRefs)
             {
                 XRefSymbol xRefSymbol = new XRefSymbol
                 {
-                    FullName = xRef.FullName
+                    FullName = xRef.Name
                 };
 
                 foreach (MemberNode member in xRef.Members)
@@ -88,27 +83,17 @@ namespace Mint.Semantics
                             xRefSymbol.Functions.Add(xFuncNode.Name, xFuncSbl);
                             break;
                     }
-                _module.XRefs[xRef.FullName] = xRefSymbol;
+                _module.XRefs[xRef.Name] = xRefSymbol;
             }
         }
 
         private void AnalyseObject(ObjectNode obj)
         {
-            switch (obj)
-            {
-                case ClassNode cls:
-                    AnalyseClass(cls);
-                    break;
-            }
-        }
-
-        private void AnalyseClass(ClassNode cls)
-        {
-            _currentClass = _module.Objects[cls.FullName];
+            _currentClass = _module.Objects[obj.Name];
 
             // TODO : add check for base class
 
-            foreach (MemberNode member in cls.Members)
+            foreach (MemberNode member in obj.Members)
                 switch (member)
                 {
                     case FunctionNode function:
@@ -144,9 +129,9 @@ namespace Mint.Semantics
             {
                 case VarDeclNode varDecl:
                     // Check if the name is proper
-                    if (_module.Classes.ContainsKey(varDecl.Name))
+                    if (_module.Objects.ContainsKey(varDecl.Name))
                     {
-                        AddError("Expected a name that's not a class.", varDecl);
+                        AddError("Expected a name that's not an object.", varDecl);
                         break;
                     }
                     TypeNode? initType = AnalyseExpr(varDecl.Initializer);
@@ -160,9 +145,9 @@ namespace Mint.Semantics
 
                 case AssignNode assign:
                     // First catch if we're trying to assign to a class
-                    if (_module.Classes.ContainsKey(assign.Name))
+                    if (_module.Objects.ContainsKey(assign.Name))
                     {
-                        AddError("Cannot assign to a class.", assign);
+                        AddError("Cannot assign to an object.", assign);
                         break;
                     }
                     TypeNode? assignType = AnalyseExpr(assign.Value);
@@ -279,7 +264,7 @@ namespace Mint.Semantics
             TypeNode? type = _scopeStack.LookUp(name);
             if (type != null)
                 return type;
-            if (_module.Classes.ContainsKey(name))
+            if (_module.Objects.ContainsKey(name))
                 return new TypeNode(name, context.Line, context.Column);
 
             // ok i unno wth this is
@@ -297,15 +282,15 @@ namespace Mint.Semantics
             string varName = names[^1];
 
             // Check in xrefs
-            if (_module.XRefs.TryGetValue(leadup, out XRefSymbol? xrefCls))
-                if (xrefCls.Variables.TryGetValue(varName, out VariableSymbol? xrefVar))
+            if (_module.XRefs.TryGetValue(leadup, out XRefSymbol? xrefObj))
+                if (xrefObj.Variables.TryGetValue(varName, out VariableSymbol? xrefVar))
                     return xrefVar.Type;
 
             // Walk the member chain until we reach the final access
             TypeNode? type = null;
 
             // The first name can be the name of a class and the next one a static field (don't care in 0.2 so TODO)
-            if (_module.Classes.ContainsKey(names[0]))
+            if (_module.Objects.ContainsKey(names[0]))
                 type = new TypeNode(names[0], qualifiedAccess.Line, qualifiedAccess.Column);
             else type = _scopeStack.LookUp(names[0]); // Probably a local variable starter
 
@@ -313,14 +298,14 @@ namespace Mint.Semantics
             {
                 for (int i = 1; i < names.Length; i++)
                 {
-                    if (!_module.Classes.TryGetValue(type.Name, out ClassSymbol? cls))
+                    if (!_module.Objects.TryGetValue(type.Name, out ObjectSymbol? obj))
                     {
-                        AddError($"'{type.Name}' is not a known class.", qualifiedAccess);
+                        AddError($"'{type.Name}' is not a known object.", qualifiedAccess);
                         return null;
                     }
-                    if (!cls.Variables.TryGetValue(names[i], out VariableSymbol? varSbl))
+                    if (!obj.Variables.TryGetValue(names[i], out VariableSymbol? varSbl))
                     {
-                        AddError($"Class '{cls.Name}' does not have a variable with the name '{names[i]}'.", qualifiedAccess);
+                        AddError($"Object '{obj.Name}' does not have a variable with the name '{names[i]}'.", qualifiedAccess);
                         return null;
                     }
                     type = varSbl.Type;
@@ -334,37 +319,37 @@ namespace Mint.Semantics
 
         private TypeNode? ResolveMemberAccessType(MemberAccessNode memberAccess)
         {
-            TypeNode? objType = AnalyseExpr(memberAccess.Object);
-            if (objType == null)
+            TypeNode? exprType = AnalyseExpr(memberAccess.Object);
+            if (exprType == null)
             {
                 AddError("Can't access member from 'void' type.", memberAccess);
                 return null;
             }
 
             // Array length property
-            if (objType.IsArray && memberAccess.Member == "Length")
+            if (exprType.IsArray && memberAccess.Member == "Length")
                 return new TypeNode("int", memberAccess.Line, memberAccess.Column);
 
             // Find it in the classes (or xrefs)
-            if (_module.Classes.TryGetValue(objType.Name, out ClassSymbol? cls))
+            if (_module.Objects.TryGetValue(exprType.Name, out ObjectSymbol? obj))
             {
-                if (cls.Variables.TryGetValue(memberAccess.Member, out VariableSymbol? varSbl))
+                if (obj.Variables.TryGetValue(memberAccess.Member, out VariableSymbol? varSbl))
                     return varSbl.Type;
 
-                AddError($"'{objType.Name}' has no member '{memberAccess.Member}'.", memberAccess);
+                AddError($"'{exprType.Name}' has no member '{memberAccess.Member}'.", memberAccess);
                 return null;
             }
 
-            if (_module.XRefs.TryGetValue(objType.Name, out XRefSymbol? xrefCls))
+            if (_module.XRefs.TryGetValue(exprType.Name, out XRefSymbol? xrefObj))
             {
-                if (xrefCls.Variables.TryGetValue(memberAccess.Member, out VariableSymbol? xrefVar))
+                if (xrefObj.Variables.TryGetValue(memberAccess.Member, out VariableSymbol? xrefVar))
                     return xrefVar.Type;
 
-                AddError($"'{objType.Name}' has no member '{memberAccess.Member}'. Did you forget to reference it in the xref ?", memberAccess);
+                AddError($"'{exprType.Name}' has no member '{memberAccess.Member}'. Did you forget to reference it in the xref ?", memberAccess);
                 return null;
             }
 
-            AddError($"'{objType.Name}' is not a known class. Did you forget to reference it with the 'xref' keyword ?", memberAccess);
+            AddError($"'{exprType.Name}' is not a known object. Did you forget to reference it with the 'xref' keyword ?", memberAccess);
             return null;
         }
 
@@ -454,7 +439,7 @@ namespace Mint.Semantics
                 }
 
             TypeNode? type = null;
-            if (_module.Classes.ContainsKey(names[0]))
+            if (_module.Objects.ContainsKey(names[0]))
                 type = new TypeNode(names[0], qualifiedCall.Line, qualifiedCall.Column);
             else type = _scopeStack.LookUp(names[0]);
 
@@ -468,27 +453,27 @@ namespace Mint.Semantics
             // last name since we're actually checking for a function name.
             for (int i = 1; i < names.Length - 1; i++)
             {
-                if (!_module.Classes.TryGetValue(type.Name, out ClassSymbol? cls))
+                if (!_module.Objects.TryGetValue(type.Name, out ObjectSymbol? obj))
                 {
-                    AddError($"'{type.Name}' is not a known class.", qualifiedCall);
+                    AddError($"'{type.Name}' is not a known object.", qualifiedCall);
                     return null;
                 }
-                if (!cls.Variables.TryGetValue(names[i], out VariableSymbol? varSbl))
+                if (!obj.Variables.TryGetValue(names[i], out VariableSymbol? varSbl))
                 {
-                    AddError($"Class '{cls.Name}' does not have a variable with the name '{names[i]}'.", qualifiedCall);
+                    AddError($"Object '{obj.Name}' does not have a variable with the name '{names[i]}'.", qualifiedCall);
                     return null;
                 }
                 type = varSbl.Type;
             }
 
-            if (!_module.Classes.TryGetValue(type.Name, out ClassSymbol? clsWithFunc))
+            if (!_module.Objects.TryGetValue(type.Name, out ObjectSymbol? objWithFunc))
             {
-                AddError($"'{type.Name}' is not a known class.", qualifiedCall);
+                AddError($"'{type.Name}' is not a known object.", qualifiedCall);
                 return null;
             }
-            if (!clsWithFunc.Functions.TryGetValue(funcName, out FunctionSymbol? funcSbl))
+            if (!objWithFunc.Functions.TryGetValue(funcName, out FunctionSymbol? funcSbl))
             {
-                AddError($"Class '{clsWithFunc.Name}' does not have a function with the name '{funcName}'.", qualifiedCall);
+                AddError($"Object '{objWithFunc.Name}' does not have a function with the name '{funcName}'.", qualifiedCall);
                 return null;
             }
 
@@ -498,38 +483,38 @@ namespace Mint.Semantics
 
         private TypeNode? ResolveMemberCallType(MemberCallNode memberCall)
         {
-            TypeNode? objType = AnalyseExpr(memberCall.Object);
-            if (objType == null)
+            TypeNode? exprType = AnalyseExpr(memberCall.Object);
+            if (exprType == null)
             {
                 AddError("Can't call function from 'void' type.", memberCall);
                 return null;
             }
 
-            if (_module.Classes.TryGetValue(objType.Name, out ClassSymbol? cls))
+            if (_module.Objects.TryGetValue(exprType.Name, out ObjectSymbol? obj))
             {
-                if (cls.Functions.TryGetValue(memberCall.Name, out FunctionSymbol? funcSbl))
+                if (obj.Functions.TryGetValue(memberCall.Name, out FunctionSymbol? funcSbl))
                 {
                     CheckArguments(ToTypeNodes(funcSbl.Parameters), memberCall.Args, memberCall, memberCall.Name);
                     return funcSbl.ReturnType;
                 }
 
-                AddError($"Class '{cls.Name}' does not have a function with the name '{memberCall.Name}'.", memberCall);
+                AddError($"Object '{obj.Name}' does not have a function with the name '{memberCall.Name}'.", memberCall);
                 return null;
             }
 
-            if (_module.XRefs.TryGetValue(objType.Name, out XRefSymbol? xrefCls))
+            if (_module.XRefs.TryGetValue(exprType.Name, out XRefSymbol? xrefObj))
             {
-                if (xrefCls.Functions.TryGetValue(memberCall.Name, out ExternalFunctionSymbol? xrefFunc))
+                if (xrefObj.Functions.TryGetValue(memberCall.Name, out ExternalFunctionSymbol? xrefFunc))
                 {
                     CheckArguments(xrefFunc.ArgumentTypes, memberCall.Args, memberCall, memberCall.Name);
                     return xrefFunc.ReturnType;
                 }
 
-                AddError($"XRef class '{xrefCls.FullName}' does not have a function with the name '{memberCall.Name}'.", memberCall);
+                AddError($"XRef object '{xrefObj.FullName}' does not have a function with the name '{memberCall.Name}'.", memberCall);
                 return null;
             }
 
-            AddError($"'{objType.Name}' is not a known class. Did you forget to reference it with the 'xref' keyword ?", memberCall);
+            AddError($"'{exprType.Name}' is not a known object. Did you forget to reference it with the 'xref' keyword ?", memberCall);
             return null;
         }
 

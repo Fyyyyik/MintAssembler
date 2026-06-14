@@ -8,9 +8,7 @@ namespace Mint.Semantics
         public Dictionary<string, XRefSymbol> XRefs { get; } = new();
     }
 
-    public abstract record ObjectSymbol;
-
-    public record ClassSymbol : ObjectSymbol
+    public record ObjectSymbol
     {
         public required string Name;
         public Dictionary<string, VariableSymbol> Variables { get; } = new();

@@ -69,7 +69,7 @@ namespace Mint
                         xrefs.Add(ParseXRef());
                         break;
                     case TokenType.Class:
-                        objects.Add(ParseClass());
+                        objects.Add(ParseObject());
                         break;
                 }
 
@@ -134,14 +134,14 @@ namespace Mint
                         Expect(TokenType.Comma);
                 }
                 Expect(TokenType.CloseBrace);
-                return new ClassNode(className, members, line, col);
+                return new ObjectNode(className, members, line, col);
             }
 
             Expect(TokenType.Semicolon);
-            return new ClassNode(className, new List<MemberNode>(), line, col);
+            return new ObjectNode(className, new List<MemberNode>(), line, col);
         }
 
-        private ClassNode ParseClass()
+        private ObjectNode ParseObject()
         {
             var (line, col) = CurrentPosition;
 
@@ -155,7 +155,7 @@ namespace Mint
 
             Expect(TokenType.CloseBrace);
 
-            return new ClassNode(name, members, line, col);
+            return new ObjectNode(name, members, line, col);
         }
 
         private MemberNode ParseMember()

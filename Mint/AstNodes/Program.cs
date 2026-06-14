@@ -12,6 +12,13 @@ namespace Mint.AstNodes
         int Column
     ) : AstNode(Line, Column);
 
+    public record ObjectNode(
+        string Name,
+        List<MemberNode> Members,
+        int Line,
+        int Column
+    ) : AstNode(Line, Column);
+
     public record NamespaceNode(
         string FullName,
         int Line,
