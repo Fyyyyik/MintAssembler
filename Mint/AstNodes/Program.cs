@@ -17,11 +17,4 @@ namespace Mint.AstNodes
         int Line,
         int Column
     ) : AstNode(Line, Column);
-
-    public record ClassNode(
-        string FullName,
-        List<MemberNode> Members,
-        int Line,
-        int Column
-    ) : AstNode(Line, Column);
 }
