@@ -4,6 +4,7 @@ namespace Mint.Semantics
 {
     public record ModuleSymbol
     {
+        public required string Namespace { get; init; }
         public Dictionary<string, ObjectSymbol> Objects { get; } = new();
         public Dictionary<string, XRefSymbol> XRefs { get; } = new();
     }

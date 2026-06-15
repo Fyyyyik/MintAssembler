@@ -233,7 +233,7 @@ namespace Mint
             };
             _pos++;
             while (Match(TokenType.Dot))
-                name += Expect(TokenType.Identifier).Value;
+                name += "." + Expect(TokenType.Identifier).Value;
 
             // Check for array suffix []
             bool isArray = false;
@@ -661,7 +661,7 @@ namespace Mint
                     // Example : 'Identifier.Identifier.func().member'
                     // The '.member' part here is what we see.
 
-                    _pos++; // consume the dot yum yum!
+                    _pos++; // consume the dot
                     string member = Expect(TokenType.Identifier).Value;
                     if (Match(TokenType.OpenParen))
                     {

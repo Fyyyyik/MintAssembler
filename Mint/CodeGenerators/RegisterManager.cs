@@ -4,14 +4,14 @@ using System.Text;
 
 namespace Mint.CodeGenerators
 {
-    internal class RegisterManager
+    public class RegisterManager
     {
-        internal Dictionary<string, byte> VarToReg = new();
-        internal byte RegisterCount = 0;
+        public Dictionary<string, byte> VarToReg = new();
+        public byte RegisterCount = 0;
 
         private Stack<HashSet<byte>> _usedRegisters = new();
 
-        internal byte AllocateRegister(string name)
+        public byte AllocateRegister(string name)
         {
             byte reg = FindFreeRegisterRange();
             _usedRegisters.Peek().Add(reg);
@@ -19,7 +19,7 @@ namespace Mint.CodeGenerators
             return reg;
         }
 
-        internal byte AllocateRegister(byte count = 1)
+        public byte AllocateRegister(byte count = 1)
         {
             byte reg = FindFreeRegisterRange(count);
             for (byte b = 0; b < count; b++)
@@ -27,7 +27,7 @@ namespace Mint.CodeGenerators
             return reg;
         }
 
-        internal void FreeRegister(byte register)
+        public void FreeRegister(byte register)
         {
             List<string> removeKeys = new();
             foreach (KeyValuePair<string, byte> pair in VarToReg)
@@ -40,9 +40,15 @@ namespace Mint.CodeGenerators
                 layer.Remove(register);
         }
 
-        internal void PushNewBlock() => _usedRegisters.Push(new());
+        public void PushNewBlock() => _usedRegisters.Push(new());
 
-        internal void ExitBlock() => _usedRegisters.Pop();
+        public HashSet<byte> ExitBlock()
+        {
+            HashSet<byte> cleared = _usedRegisters.Pop();
+            foreach (byte reg in cleared)
+                FreeRegister(reg);
+            return cleared;
+        }
 
         // Finds the first range of free registers and returns the index of the lowest
         // register of that range

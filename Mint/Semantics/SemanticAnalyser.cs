@@ -7,7 +7,7 @@ namespace Mint.Semantics
         private readonly VersionRules _rules;
         private readonly Dictionary<ExprNode, TypeNode> _exprTypes = new();
         private readonly List<SemanticError> _errors = new();
-        private ModuleSymbol _module = new();
+        private ModuleSymbol _module;
         private ObjectSymbol? _currentClass;
         private FunctionSymbol? _currentFunction;
         private readonly ScopeStack _scopeStack = new();
@@ -16,6 +16,8 @@ namespace Mint.Semantics
 
         public SemanticResult Analyse(ModuleNode module)
         {
+            _module = new() { Namespace = module.Namespace.FullName };
+
             // Pass 1
             BuildSymbolTable(module);
 
@@ -260,7 +262,7 @@ namespace Mint.Semantics
         {
             // Here we get something like 'Identifier.Identifier.Identifier'
             // Have to figure out if it's a static variable from some xref
-            // Or it could be just accessing a variable from an object (not in 0.2)
+            // Or it could be just accessing a variable from an object
 
             string[] names = qualifiedAccess.FullName.Split('.');
             string leadup = string.Join('.', names[..^1]); // Could be a class name or a member chain
@@ -274,7 +276,7 @@ namespace Mint.Semantics
             // Walk the member chain until we reach the final access
             TypeNode? type = null;
 
-            // The first name can be the name of a class and the next one a static field (don't care in 0.2 so TODO)
+            // The first name can be the name of a class and the next one a static field
             if (_module.Objects.ContainsKey(names[0]))
                 type = new TypeNode(names[0], qualifiedAccess.Line, qualifiedAccess.Column);
             else type = _scopeStack.LookUp(names[0]); // Probably a local variable starter
@@ -362,7 +364,7 @@ namespace Mint.Semantics
                 AddError("Cannot use keyword 'this' outside of a class.", ts);
                 return null;
             }
-            return new TypeNode(_currentClass.Name, ts.Line, ts.Column);
+            return new TypeNode($"{_module.Namespace}.{_currentClass.Name}", ts.Line, ts.Column);
         }
 
         private TypeNode? ResolveBinaryExprType(BinaryExprNode binaryExpr)
