@@ -23,8 +23,8 @@ namespace Mint.CodeGenerators
 
         private readonly List<byte> _sdata = new();
         private readonly List<string> _xrefs = new();
-        private string _currentObj;
-        private string _currentFunction;
+        private ObjectSymbol? _currentObj;
+        private FunctionSymbol? _currentFunction;
         private HashSet<byte> _arrayRegs = new();
         private Dictionary<byte, string> _instanceRegs = new();
 
@@ -129,6 +129,11 @@ namespace Mint.CodeGenerators
             };
         }
 
+        protected byte[] GenerateIdentifierAssign(AssignNode assign, IdentifierNode targetIdent)
+        {
+            return GenerateExpr(assign.Value, _registers.VarToReg[targetIdent.Name]);
+        }
+
         protected byte[] GenerateArrayAssign(AssignNode assign, ArrayAccessNode targetArray)
         {
             List<byte> data = new();
@@ -172,7 +177,9 @@ namespace Mint.CodeGenerators
 
         protected byte[] GenerateQualifiedAssign(AssignNode assign, QualifiedAccessNode targetQualified)
         {
+            List<byte> data = new();
 
+            
         }
 
         protected byte[] GenerateIf(IfNode ifNode)

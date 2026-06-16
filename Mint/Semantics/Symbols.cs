@@ -6,12 +6,15 @@ namespace Mint.Semantics
     {
         public required string Namespace { get; init; }
         public Dictionary<string, ObjectSymbol> Objects { get; } = new();
+
+        // NOTE : the xrefs are what the semantic analyser is aware of, NOT the
+        // list of xrefs for the final mint module!
         public Dictionary<string, XRefSymbol> XRefs { get; } = new();
     }
 
     public record ObjectSymbol
     {
-        public required string Name;
+        public required string FullName;
         public Dictionary<string, VariableSymbol> Variables { get; } = new();
         public Dictionary<string, FunctionSymbol> Functions { get; } = new();
     }

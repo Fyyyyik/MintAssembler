@@ -21,8 +21,11 @@ namespace Mint.Semantics
             // Pass 1
             BuildSymbolTable(module);
 
-            // Pass 2 - type checking
-            foreach (ObjectNode obj in module.Objects)
+            // Pass 2
+            ModuleNode rewritten = new Rewriter(_module).Rewrite(module);
+
+            // Pass 3 - type checking
+            foreach (ObjectNode obj in rewritten.Objects)
                 AnalyseObject(obj);
 
             return new SemanticResult(_module, _exprTypes, _errors);
@@ -34,7 +37,7 @@ namespace Mint.Semantics
             {
                 ObjectSymbol objSymbol = new ObjectSymbol
                 {
-                    Name = obj.Name
+                    FullName = GetFullObjectName(obj.Name)
                 };
 
                 foreach (MemberNode member in obj.Members)
@@ -131,7 +134,7 @@ namespace Mint.Semantics
             {
                 case VarDeclNode varDecl:
                     // Check if the name is proper
-                    if (_module.Objects.ContainsKey(varDecl.Name))
+                    if (IsObject(varDecl.Name))
                     {
                         AddError("Expected a name that's not an object.", varDecl);
                         break;
@@ -147,7 +150,9 @@ namespace Mint.Semantics
 
                 case AssignNode assign:
                     // First catch if we're trying to assign to something that can't be assigned to
-                    if (!(assign.Target is IdentifierNode or QualifiedAccessNode or MemberAccessNode or ArrayAccessNode))
+                    if (!(assign.Target is IdentifierNode or QualifiedAccessNode or MemberAccessNode or ArrayAccessNode) ||
+                        (assign.Target is IdentifierNode ident && IsObject(ident.Name)) ||
+                        (assign.Target is QualifiedAccessNode qa && IsObject(qa.FullName)))
                     {
                         AddError("Assignement is not allowed.", assign);
                         break;
@@ -206,7 +211,7 @@ namespace Mint.Semantics
                     break;
 
                 case IncrementNode inc:
-                    if (ResolveIdentifierType(inc.Name, inc)?.Name != "int")
+                    if (ResolveIdentifierType(inc.Name)?.Name != "int")
                         AddError($"Cannot increment/decrement non-int variable '{inc.Name}'", inc);
                     break;
             }
@@ -221,7 +226,7 @@ namespace Mint.Semantics
                 BoolLiteralNode _ => new TypeNode("bool", expr.Line, expr.Column),
                 StringLiteralNode _ => new TypeNode("string", expr.Line, expr.Column),
 
-                IdentifierNode id => ResolveIdentifierType(id.Name, id),
+                IdentifierNode id => ResolveIdentifierType(id.Name),
                 QualifiedAccessNode qa => ResolveQualifiedAccessType(qa),
                 MemberAccessNode ma => ResolveMemberAccessType(ma),
                 ArrayAccessNode aa => ResolveArrayAccessType(aa),
@@ -243,62 +248,25 @@ namespace Mint.Semantics
             return type;
         }
 
-        private TypeNode? ResolveIdentifierType(string name, AstNode context)
-        {
-            // In this house we refer to class variables with 'this' prefixed.
-            // A single identifier is referring to a local variable.
-            // It could also mean we're pushing an instance (sppsh and sppshz)
-            TypeNode? type = _scopeStack.LookUp(name);
-            if (type != null)
-                return type;
-            if (_module.Objects.ContainsKey(name))
-                return new TypeNode(name, context.Line, context.Column);
-
-            // ok i unno wth this is
-            return null;
-        }
+        private TypeNode? ResolveIdentifierType(string name) => _scopeStack.LookUp(name);
 
         private TypeNode? ResolveQualifiedAccessType(QualifiedAccessNode qualifiedAccess)
         {
-            // Here we get something like 'Identifier.Identifier.Identifier'
-            // Have to figure out if it's a static variable from some xref
-            // Or it could be just accessing a variable from an object
+            // Full qualified path to a static variable
 
             string[] names = qualifiedAccess.FullName.Split('.');
-            string leadup = string.Join('.', names[..^1]); // Could be a class name or a member chain
+            string leadup = string.Join('.', names[..^1]);
             string varName = names[^1];
+
+            // Check in objects
+            if (_module.Objects.TryGetValue(names[^2], out ObjectSymbol? locObj))
+                if (locObj.Variables.TryGetValue(varName, out VariableSymbol? locVar))
+                    return locVar.Type;
 
             // Check in xrefs
             if (_module.XRefs.TryGetValue(leadup, out XRefSymbol? xrefObj))
                 if (xrefObj.Variables.TryGetValue(varName, out VariableSymbol? xrefVar))
                     return xrefVar.Type;
-
-            // Walk the member chain until we reach the final access
-            TypeNode? type = null;
-
-            // The first name can be the name of a class and the next one a static field
-            if (_module.Objects.ContainsKey(names[0]))
-                type = new TypeNode(names[0], qualifiedAccess.Line, qualifiedAccess.Column);
-            else type = _scopeStack.LookUp(names[0]); // Probably a local variable starter
-
-            if (type != null)
-            {
-                for (int i = 1; i < names.Length; i++)
-                {
-                    if (!_module.Objects.TryGetValue(type.Name, out ObjectSymbol? obj))
-                    {
-                        AddError($"'{type.Name}' is not a known object.", qualifiedAccess);
-                        return null;
-                    }
-                    if (!obj.Variables.TryGetValue(names[i], out VariableSymbol? varSbl))
-                    {
-                        AddError($"Object '{obj.Name}' does not have a variable with the name '{names[i]}'.", qualifiedAccess);
-                        return null;
-                    }
-                    type = varSbl.Type;
-                }
-                return type;
-            }
 
             AddError($"Cannot resolve '{qualifiedAccess.FullName}'.", qualifiedAccess);
             return null;
@@ -364,7 +332,7 @@ namespace Mint.Semantics
                 AddError("Cannot use keyword 'this' outside of a class.", ts);
                 return null;
             }
-            return new TypeNode($"{_module.Namespace}.{_currentClass.Name}", ts.Line, ts.Column);
+            return new TypeNode(_currentClass.FullName, ts.Line, ts.Column);
         }
 
         private TypeNode? ResolveBinaryExprType(BinaryExprNode binaryExpr)
@@ -418,6 +386,13 @@ namespace Mint.Semantics
             string leadup = string.Join('.', names[..^1]);
             string funcName = names[^1];
 
+            if (_module.Objects.TryGetValue(names[^2], out ObjectSymbol? locObj))
+                if (locObj.Functions.TryGetValue(funcName, out FunctionSymbol? objFunc))
+                {
+                    CheckArguments(ToTypeNodes(objFunc.Parameters), qualifiedCall.Args, qualifiedCall, funcName);
+                    return objFunc.ReturnType;
+                }
+
             if (_module.XRefs.TryGetValue(leadup, out XRefSymbol? xrefCls))
                 if (xrefCls.Functions.TryGetValue(funcName, out ExternalFunctionSymbol? xrefFunc))
                 {
@@ -425,47 +400,8 @@ namespace Mint.Semantics
                     return xrefFunc.ReturnType;
                 }
 
-            TypeNode? type = null;
-            if (_module.Objects.ContainsKey(names[0]))
-                type = new TypeNode(names[0], qualifiedCall.Line, qualifiedCall.Column);
-            else type = _scopeStack.LookUp(names[0]);
-
-            if (type == null)
-            {
-                AddError($"Cannot resolve '{qualifiedCall.FullName}'.", qualifiedCall);
-                return null;
-            }
-
-            // Walk the member chain like with a variable but this time stop before the
-            // last name since we're actually checking for a function name.
-            for (int i = 1; i < names.Length - 1; i++)
-            {
-                if (!_module.Objects.TryGetValue(type.Name, out ObjectSymbol? obj))
-                {
-                    AddError($"'{type.Name}' is not a known object.", qualifiedCall);
-                    return null;
-                }
-                if (!obj.Variables.TryGetValue(names[i], out VariableSymbol? varSbl))
-                {
-                    AddError($"Object '{obj.Name}' does not have a variable with the name '{names[i]}'.", qualifiedCall);
-                    return null;
-                }
-                type = varSbl.Type;
-            }
-
-            if (!_module.Objects.TryGetValue(type.Name, out ObjectSymbol? objWithFunc))
-            {
-                AddError($"'{type.Name}' is not a known object.", qualifiedCall);
-                return null;
-            }
-            if (!objWithFunc.Functions.TryGetValue(funcName, out FunctionSymbol? funcSbl))
-            {
-                AddError($"Object '{objWithFunc.Name}' does not have a function with the name '{funcName}'.", qualifiedCall);
-                return null;
-            }
-
-            CheckArguments(ToTypeNodes(funcSbl.Parameters), qualifiedCall.Args, qualifiedCall, funcName);
-            return funcSbl.ReturnType;
+            AddError($"Cannot resolve '{qualifiedCall.FullName}'.", qualifiedCall);
+            return null;
         }
 
         private TypeNode? ResolveMemberCallType(MemberCallNode memberCall)
@@ -485,7 +421,7 @@ namespace Mint.Semantics
                     return funcSbl.ReturnType;
                 }
 
-                AddError($"Object '{obj.Name}' does not have a function with the name '{memberCall.Name}'.", memberCall);
+                AddError($"Object '{obj.FullName}' does not have a function with the name '{memberCall.Name}'.", memberCall);
                 return null;
             }
 
@@ -547,5 +483,9 @@ namespace Mint.Semantics
                 typeNodes.Add(param.Type);
             return typeNodes.ToArray();
         }
+
+        private bool IsObject(string name) => _module.Objects.ContainsKey(name) || _module.XRefs.ContainsKey(name);
+
+        private string GetFullObjectName(string objName) => $"{_module.Namespace}.{objName}";
     }
 }
