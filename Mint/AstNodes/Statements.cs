@@ -51,6 +51,4 @@ namespace Mint.AstNodes
     public record ReturnNode(ExprNode? Value, int Line, int Column) : StmtNode(Line, Column);
 
     public record ExprStmtNode(ExprNode Expr, int Line, int Column) : StmtNode(Line, Column);
-
-    public record IncrementNode(string Name, bool IsPrefix, bool IsIncrement, int Line, int Column) : StmtNode(Line, Column);
 }

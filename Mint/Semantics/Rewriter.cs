@@ -125,6 +125,7 @@ namespace Mint.Semantics
             QualifiedCallNode qc => RewriteQualifiedCall(qc),
             MemberCallNode mc => RewriteMemberCall(mc),
             ArrayCreationNode ac => RewriteArrayCreation(ac),
+            IncrementNode inc => inc with { Target = RewriteExpression(inc.Target) },
 
             _ => expr
         };

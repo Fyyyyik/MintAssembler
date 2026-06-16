@@ -43,4 +43,5 @@ namespace Mint.AstNodes
     // size is null if no expression is put between the brackets
     // if there are initializers, figure out the size from that
     public record ArrayCreationNode(TypeNode ElementType, ExprNode? Size, int Line, int Column, List<ExprNode>? Initializers = null) : ExprNode(Line, Column);
+    public record IncrementNode(ExprNode Target, bool IsPrefix, bool IsIncrement, int Line, int Column) : ExprNode(Line, Column);
 }

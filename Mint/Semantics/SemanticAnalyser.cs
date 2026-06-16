@@ -209,11 +209,6 @@ namespace Mint.Semantics
                 case ExprStmtNode exprStmt:
                     AnalyseExpr(exprStmt.Expr);
                     break;
-
-                case IncrementNode inc:
-                    if (ResolveIdentifierType(inc.Name)?.Name != "int")
-                        AddError($"Cannot increment/decrement non-int variable '{inc.Name}'", inc);
-                    break;
             }
         }
 
@@ -237,6 +232,7 @@ namespace Mint.Semantics
                 MemberCallNode mc => ResolveMemberCallType(mc),
                 NewObjectNode no => ResolveNewObjectType(no),
                 ArrayCreationNode ac => ResolveArrayCreationType(ac),
+                IncrementNode inc => ResolveIncrementType(inc),
                 // TODO : add more types of expressions for versions with oop
 
                 _ => null
@@ -449,6 +445,20 @@ namespace Mint.Semantics
         private TypeNode? ResolveArrayCreationType(ArrayCreationNode arrayCreation)
         {
             return new TypeNode(arrayCreation.ElementType.Name, arrayCreation.Line, arrayCreation.Column, true);
+        }
+
+        private TypeNode? ResolveIncrementType(IncrementNode increment)
+        {
+            TypeNode? type = AnalyseExpr(increment.Target);
+            if (type == null)
+            {
+                AddError("Cannot increment or decrement type 'void'.", increment);
+                return null;
+            }
+            if (type.Name is "int" or "float")
+                return type;
+            AddError($"Increment and decrement operations are only allowed on types 'int' and 'float'. Not type '{type.Name}'.", increment);
+            return null;
         }
 
         private void CheckArguments(IList<TypeNode> expectedTypes, IList<ExprNode> arguments, AstNode context, string funcName)

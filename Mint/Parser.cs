@@ -392,27 +392,7 @@ namespace Mint
         {
             var (line, col) = CurrentPosition;
 
-            // Prefix like ++x or --x
-            if (Current.Type is TokenType.DoublePlus or TokenType.DoubleMinus)
-            {
-                bool isIncrement = Current.Type == TokenType.DoublePlus;
-                _pos++;
-                string name = Expect(TokenType.Identifier).Value;
-                if (expectSemicolon) Expect(TokenType.Semicolon);
-                return new IncrementNode(name, true, isIncrement, line, col);
-            }
-
             ExprNode expr = ParseExpression();
-
-            // Postfix like x++ or x--
-            if (expr is IdentifierNode postfixIdent &&
-                Current.Type is TokenType.DoublePlus or TokenType.DoubleMinus)
-            {
-                bool isIncrement = Current.Type == TokenType.DoublePlus;
-                _pos++;
-                if (expectSemicolon) Expect(TokenType.Semicolon);
-                return new IncrementNode(postfixIdent.Name, false, isIncrement, line, col);
-            }
             
             // Equals means assign
             if (Check(TokenType.Equals))
@@ -613,6 +593,36 @@ namespace Mint
                 return new UnaryExprNode(op, operand, line, col);
             }
             return ParsePostfix();
+        }
+
+        private ExprNode ParseIncrementDecrement()
+        {
+            if (Current.Type is TokenType.DoublePlus or TokenType.DoubleMinus)
+            {
+                var (line, col) = CurrentPosition;
+                bool increment = Current.Type == TokenType.DoublePlus;
+                ExprNode target = ParsePostfix();
+                CheckTargetIncrement(target, line, col);
+                return new IncrementNode(target, true, increment, line, col);
+            }
+
+            ExprNode expr = ParsePostfix();
+
+            if (Current.Type is TokenType.DoublePlus or TokenType.DoubleMinus)
+            {
+                var (line, col) = CurrentPosition;
+                CheckTargetIncrement(expr, line, col);
+                bool increment = Current.Type == TokenType.DoublePlus;
+                expr = new IncrementNode(expr, false, increment, line, col);
+            }
+
+            return expr;
+        }
+
+        private void CheckTargetIncrement(ExprNode expr, int line, int col)
+        {
+            if (!(expr is IdentifierNode or ArrayAccessNode or MemberAccessNode or QualifiedAccessNode))
+                throw new ParserException("Cannot increment/decrement on this expression.", line, col);
         }
 
         private ExprNode ParsePostfix()
