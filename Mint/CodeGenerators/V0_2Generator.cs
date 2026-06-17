@@ -4,6 +4,8 @@ using Mint.Semantics;
 using OneOf;
 using System;
 using System.Collections.Generic;
+using System.Data;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices.Marshalling;
 using System.Text;
 using System.Xml.Linq;
@@ -23,8 +25,8 @@ namespace Mint.CodeGenerators
 
         private readonly List<byte> _sdata = new();
         private readonly List<string> _xrefs = new();
-        private ObjectSymbol? _currentObj;
-        private FunctionSymbol? _currentFunction;
+        private ObjectSymbol? _currentObj = null;
+        private FunctionSymbol? _currentFunction = null;
         private HashSet<byte> _arrayRegs = new();
         private Dictionary<byte, string> _instanceRegs = new();
 
@@ -42,16 +44,18 @@ namespace Mint.CodeGenerators
             return rtdl;
         }
 
+        /*
         public Module Generate(ModuleNode module)
         {
             Module mintModule = new();
 
             foreach (ObjectNode)
         }
+        */
 
         private MintObject GenerateObject(ObjectNode obj)
         {
-            _currentObj = obj.Name;
+            _currentObj = _semantic.Module.Objects[obj.Name];
 
             MintObject mintObj = new()
             {
@@ -70,13 +74,13 @@ namespace Mint.CodeGenerators
                         break;
                 }
 
-            _currentObj = string.Empty;
+            _currentObj = null;
             return mintObj;
         }
 
         private MintFunction GenerateFunction(FunctionNode funcNode)
         {
-            _currentFunction = funcNode.Name;
+            _currentFunction = _currentObj?.Functions[funcNode.Name];
             _registers = new();
 
             MintFunction mintFunc = new(funcNode.Name)
@@ -85,7 +89,7 @@ namespace Mint.CodeGenerators
                 Data = GenerateBlock(funcNode.Body, true)
             };
 
-            _currentFunction = string.Empty;
+            _currentFunction = null;
             return mintFunc;
         }
 
@@ -103,6 +107,12 @@ namespace Mint.CodeGenerators
             return statement switch
             {
                 VarDeclNode vd => GenerateVarDecl(vd),
+                AssignNode ass => GenerateAssign(ass),
+                IfNode ifNode => GenerateIf(ifNode),
+                WhileNode whileNode => GenerateWhile(whileNode),
+                ForNode forNode => GenerateFor(forNode),
+                ReturnNode returnNode => GenerateReturn(returnNode),
+                ExprStmtNode expr => GenerateExprStmt(expr),
 
                 _ => throw new NotImplementedException("Unknown statement type.")
             };
@@ -127,11 +137,6 @@ namespace Mint.CodeGenerators
 
                 _ => throw new CodeGeneratorException($"Unknown assign target node : {assign.Target}", assign.Line, assign.Column)
             };
-        }
-
-        protected byte[] GenerateIdentifierAssign(AssignNode assign, IdentifierNode targetIdent)
-        {
-            return GenerateExpr(assign.Value, _registers.VarToReg[targetIdent.Name]);
         }
 
         protected byte[] GenerateArrayAssign(AssignNode assign, ArrayAccessNode targetArray)
@@ -168,7 +173,7 @@ namespace Mint.CodeGenerators
             string xref = $"{_semantic.ExprTypes[targetMember.Object].Name}.{targetMember.Member}";
             ushort v = (ushort)AddOrGetXRef(xref);
             data.AddRange([GetOpcode("addofs"), objReg, (byte)((v >> 8) & 0xFF), (byte)(v & 0xFF)]);
-            data.AddRange([GetOpcode("stsrsr"), objReg, valReg]);
+            data.AddRange([GetOpcode("stsrsr"), objReg, valReg, 0xFF]);
 
             _registers.FreeRegister(objReg);
             _registers.FreeRegister(valReg);
@@ -179,7 +184,14 @@ namespace Mint.CodeGenerators
         {
             List<byte> data = new();
 
-            
+            byte valReg = _registers.AllocateRegister();
+            data.AddRange(GenerateExpr(assign.Value, valReg));
+
+            ushort v = (ushort)AddOrGetXRef(targetQualified.FullName);
+            data.AddRange([GetOpcode("stsvsr"), valReg, (byte)((v >> 8) & 0xFF), (byte)(v & 0xFF)]);
+
+            _registers.FreeRegister(valReg);
+            return data.ToArray();
         }
 
         protected byte[] GenerateIf(IfNode ifNode)
@@ -219,6 +231,7 @@ namespace Mint.CodeGenerators
         protected byte[] GenerateWhile(WhileNode whileNode)
         {
             List<byte> data = new();
+
             byte condReg = _registers.AllocateRegister();
             data.AddRange(GenerateExpr(whileNode.Condition, condReg));
             int jmpnegInstructionPos = data.Count;
@@ -243,13 +256,83 @@ namespace Mint.CodeGenerators
             return data.ToArray();
         }
 
-        protected byte[] GenerateExpr(ExprNode expr, byte destRegister)
+        protected byte[] GenerateFor(ForNode forNode)
         {
-            switch (expr)
-            {
+            List<byte> data = new();
 
-            }
+            data.AddRange(GenerateStatement(forNode.Initializer));
+
+            int condPos = data.Count;
+            byte condReg = _registers.AllocateRegister();
+            data.AddRange(GenerateExpr(forNode.Condition, condReg));
+
+            int condJmpPos = data.Count;
+            data.AddRange([GetOpcode("jmpneg"), condReg, 0x00, 0x00]); // temporary v
+            _registers.FreeRegister(condReg);
+
+            byte[] bodyBlock = GenerateBlock(forNode.Body);
+            data.AddRange(bodyBlock);
+
+            byte[] incBlock = GenerateStatement(forNode.Increment);
+            data.AddRange(incBlock);
+
+            short bodyJmpV = (short)((condPos - data.Count) / InstructionSize);
+            data.AddRange([GetOpcode("jmp"), 0xFF, (byte)((bodyJmpV >> 8) & 0xFF), (byte)(bodyJmpV & 0xFF)]);
+
+            short condJmpV = (short)((data.Count - condJmpPos) / InstructionSize);
+            data[condJmpPos + 2] = (byte)((condJmpV >> 8) & 0xFF);
+            data[condJmpPos + 3] = (byte)(condJmpV & 0xFF);
+
+            return data.ToArray();
         }
+
+        protected byte[] GenerateReturn(ReturnNode returnNode)
+        {
+            if (returnNode.Value != null)
+            {
+                List<byte> data = new();
+
+                byte valReg = _registers.AllocateRegister();
+                data.AddRange(GenerateExpr(returnNode.Value, valReg));
+
+                data.AddRange([GetOpcode("ldsrsr"), 0, valReg, 0xFF]);
+                data.AddRange([GetOpcode("fret"), 0xFF, 0, 0xFF]);
+
+                _registers.FreeRegister(valReg);
+                return data.ToArray();
+            }
+            else return [GetOpcode("fleave"), 0xFF, 0xFF, 0xFF];
+        }
+
+        protected byte[] GenerateExprStmt(ExprStmtNode exprStmt)
+        {
+            byte scratch = _registers.AllocateRegister();
+            byte[] data = GenerateExpr(exprStmt.Expr, scratch);
+            _registers.FreeRegister(scratch);
+            return data;
+        }
+
+        protected byte[] GenerateExpr(ExprNode expr, byte destRegister) => expr switch
+        {
+            IntLiteralNode intLit => GenerateIntLiteral(intLit, destRegister),
+            FloatLiteralNode floatLit => GenerateFloatLiteral(floatLit, destRegister),
+            BoolLiteralNode boolLit => GenerateBoolLiteral(boolLit, destRegister),
+            StringLiteralNode stringLit => GenerateStringLiteral(stringLit, destRegister),
+            IdentifierNode id => GenerateIdentifier(id, destRegister),
+            QualifiedAccessNode qa => GenerateQualifiedAccess(qa, destRegister),
+            MemberAccessNode ma => GenerateMemberAccess(ma, destRegister),
+            ArrayAccessNode aa => GenerateArrayAccess(aa, destRegister),
+            ThisNode => GenerateThis(destRegister),
+            BinaryExprNode be => GenerateBinaryExpr(be, destRegister),
+            UnaryExprNode ue => GenerateUnaryExpr(ue, destRegister),
+            QualifiedCallNode qc => GenerateQualifiedCall(qc, destRegister),
+            MemberCallNode mc => GenerateMemberCall(mc, destRegister),
+            PushInstanceNode pi => GeneratePushInstance(pi, destRegister),
+            ArrayCreationNode ac => GenerateArrayCreation(ac, destRegister),
+            IncrementNode inc => GenerateIncrement(inc, destRegister),
+
+            _ => throw new CodeGeneratorException($"Invalid expression node for this version : {expr}", expr.Line, expr.Column)
+        };
 
         protected byte[] GenerateIntLiteral(IntLiteralNode intLiteral, byte destRegister)
         {
@@ -301,7 +384,6 @@ namespace Mint.CodeGenerators
 
         protected byte[] GenerateIdentifier(IdentifierNode identifier, byte destRegister)
         {
-            // Either that's a local variable or we're trying to push an instance of something
             if (_registers.VarToReg.TryGetValue(identifier.Name, out byte reg))
                 return [
                     GetOpcode("ldsrsr"),
@@ -309,30 +391,370 @@ namespace Mint.CodeGenerators
                     reg,
                     0xFF
                 ];
-
-            List<byte> data = new();
-            string name = identifier.Name;
-
-            // If what we're referencing is in the same module, add the whole namespace to the path
-            if (_semantic.Module.Objects.ContainsKey(identifier.Name))
-                name = $"{_semantic.Module.Namespace}.{identifier.Name}";
-
-            // Generate the code
-            ushort v = (ushort)AddOrGetXRef(name);
-            return [
-                GetOpcode("sppshz"),
-                destRegister,
-                (byte)((v >> 8) & 0xFF),
-                (byte)(v & 0xFF)
-            ];
+            throw new CodeGeneratorException($"Register for identifier '{identifier.Name}' not found.", identifier.Line, identifier.Column);
         }
 
-        protected abstract byte[] GenerateQualifiedAccess(QualifiedAccessNode qualifiedAccess, byte destRegister);
-
-        protected byte[] GenerateArrayCreation(ArrayCreationNode arrayCreation, byte? destRegister)
+        protected byte[] GenerateQualifiedAccess(QualifiedAccessNode qualifiedAccess, byte destRegister)
         {
-
+            ushort v = (ushort)AddOrGetXRef(qualifiedAccess.FullName);
+            return [GetOpcode("ldsrsv"), destRegister, (byte)((v >> 8) & 0xFF), (byte)(v & 0xFF)];
         }
+
+        protected byte[] GenerateMemberAccess(MemberAccessNode memberAccess, byte destRegister)
+        {
+            List<byte> data = new();
+
+            byte objReg = _registers.AllocateRegister();
+            data.AddRange(GenerateMemberSetup(memberAccess, objReg));
+            data.AddRange([GetOpcode("ldsra4"), destRegister, objReg, 0xFF]);
+
+            _registers.FreeRegister(objReg);
+            return data.ToArray();
+        }
+
+        protected byte[] GenerateArrayAccess(ArrayAccessNode arrayAccess, byte destRegister)
+        {
+            List<byte> data = new();
+
+            byte arrReg = _registers.AllocateRegister();
+            data.AddRange(GenerateExpr(arrayAccess.Array, arrReg));
+
+            byte idxReg = _registers.AllocateRegister();
+            data.AddRange(GenerateExpr(arrayAccess.Index, idxReg));
+
+            byte cpyReg = _registers.AllocateRegister();
+            data.AddRange([GetOpcode("ldsrsr"), cpyReg, arrReg, 0xFF]);
+
+            data.AddRange([GetOpcode("arirx"), cpyReg, idxReg, 0xFF]);
+            data.AddRange([GetOpcode("ldsra4"), destRegister, cpyReg, 0xFF]);
+
+            if (arrayAccess.Array is not ArrayCreationNode)
+                _registers.FreeRegister(arrReg);
+            _registers.FreeRegister(idxReg);
+            _registers.FreeRegister(cpyReg);
+            return data.ToArray();
+        }
+
+        protected byte[] GenerateThis(byte destRegister)
+            => [GetOpcode("ldsrsr"), destRegister, 0, 0xFF];
+
+        protected byte[] GenerateBinaryExpr(BinaryExprNode binaryExpr, byte destRegister)
+        {
+            List<byte> data = new();
+            TypeNode binType = _semantic.ExprTypes[binaryExpr];
+            TypeNode leftType = _semantic.ExprTypes[binaryExpr.Left];
+            TypeNode rightType = _semantic.ExprTypes[binaryExpr.Right];
+
+            byte leftReg = _registers.AllocateRegister();
+            data.AddRange(GenerateExpr(binaryExpr.Left, leftReg));
+
+            byte rightReg = _registers.AllocateRegister();
+            data.AddRange(GenerateExpr(binaryExpr.Right, rightReg));
+
+            string opcode = binaryExpr.Op switch
+            {
+                "+" when AreBothType(leftType, rightType, "int") => "addi32",
+                "+" when AreBothType(leftType, rightType, "float") => "addf32",
+                "-" when AreBothType(leftType, rightType, "int") => "subi32",
+                "-" when AreBothType(leftType, rightType, "float") => "subf32",
+                "*" when AreBothType(leftType, rightType, "int") => "muls32",
+                "*" when AreBothType(leftType, rightType, "float") => "mulf32",
+                "/" when AreBothType(leftType, rightType, "int") => "divs32",
+                "/" when AreBothType(leftType, rightType, "float") => "divf32",
+                "%" when AreBothType(leftType, rightType, "int") => "mods32",
+                "<" or ">" when AreBothType(leftType, rightType, "int") => "lts32",
+                "<=" or ">=" when AreBothType(leftType, rightType, "int") => "les32",
+                "==" when AreBothType(leftType, rightType, "int") => "eqi32",
+                "!=" when AreBothType(leftType, rightType, "int") => "nei32",
+                ">" or "<" when AreBothType(leftType, rightType, "float") => "ltf32",
+                ">=" or "<=" when AreBothType(leftType, rightType, "float") => "lef32",
+                "==" when AreBothType(leftType, rightType, "float") => "eqf32",
+                "!=" when AreBothType(leftType, rightType, "float") => "nef32",
+                "==" when AreBothType(leftType, rightType, "bool") => "eqbool",
+                "!=" when AreBothType(leftType, rightType, "bool") => "nebool",
+                "&" when AreBothType(leftType, rightType, "int") => "andi32",
+                "|" when AreBothType(leftType, rightType, "int") => "ori32",
+                "^" when AreBothType(leftType, rightType, "int") => "xori32",
+                "<<" when AreBothType(leftType, rightType, "int") => "slli32",
+                ">>" when AreBothType(leftType, rightType, "int") => "slri32",
+
+                _ => throw new CodeGeneratorException($"Unknown binary operation with operator '{binaryExpr.Op}'.", binaryExpr.Line, binaryExpr.Column)
+            };
+
+            // Special case for comparing stuff
+            bool invertOperands = false;
+            if ((opcode is "lts32" or "les32" && binaryExpr.Op is ">" or ">=") ||
+                (opcode is "ltf32" or "lef32" && binaryExpr.Op is "<" or "<="))
+                invertOperands = true;
+
+            data.AddRange([GetOpcode(opcode), destRegister, invertOperands ? rightReg : leftReg, invertOperands ? leftReg : rightReg]);
+            _registers.FreeRegister(leftReg);
+            _registers.FreeRegister(rightReg);
+            return data.ToArray();
+        }
+
+        protected byte[] GenerateUnaryExpr(UnaryExprNode unaryExpr, byte destRegister)
+        {
+            List<byte> data = new();
+            TypeNode operandType = _semantic.ExprTypes[unaryExpr.Operand];
+
+            byte operandReg = _registers.AllocateRegister();
+            data.AddRange(GenerateExpr(unaryExpr.Operand, operandReg));
+
+            string opcode = unaryExpr.Op switch
+            {
+                "-" when operandType.Name == "int" => "negs32",
+                "-" when operandType.Name == "float" => "negf32",
+                "!" when operandType.Name == "bool" => "ntbool",
+
+                _ => throw new CodeGeneratorException($"Unknown unary operation with operator '{unaryExpr.Op}'.", unaryExpr.Line, unaryExpr.Column)
+            };
+
+            data.AddRange([GetOpcode(opcode), destRegister, operandReg, 0xFF]);
+            _registers.FreeRegister(operandReg);
+            return data.ToArray();
+        }
+
+        protected byte[] GenerateQualifiedCall(QualifiedCallNode qualifiedCall, byte destRegister)
+        {
+            List<byte> data = new();
+
+            List<byte> regs = new();
+            List<TypeNode> argTypes = new();
+            foreach (ExprNode arg in qualifiedCall.Args)
+            {
+                regs.Add(_registers.AllocateRegister());
+                data.AddRange(GenerateExpr(arg, regs[^1]));
+
+                argTypes.Add(_semantic.ExprTypes[arg]);
+            }
+
+            bool isReturn = DoesFunctionReturn(qualifiedCall.FullName, argTypes);
+
+            for (int i = 0; i < regs.Count; i++)
+                data.AddRange([GetOpcode("ldfrsr"), (byte)(isReturn ? i + 1 : i), regs[i], 0xFF]);
+
+            ushort v = (ushort)AddOrGetXRef(AppendParamTypes(qualifiedCall.FullName, argTypes));
+            data.AddRange([GetOpcode("call"), 0xFF, (byte)((v >> 8) & 0xFF), (byte)(v & 0xFF)]);
+
+            if (isReturn)
+                data.AddRange([GetOpcode("ldsrfz"), destRegister, 0xFF, 0xFF]);
+
+            foreach (byte reg in regs)
+                _registers.FreeRegister(reg);
+            return data.ToArray();
+        }
+
+        protected byte[] GenerateMemberCall(MemberCallNode memberCall, byte destRegister)
+        {
+            List<byte> data = new();
+
+            byte objReg = _registers.AllocateRegister();
+            data.AddRange(GenerateExpr(memberCall.Object, objReg));
+
+            List<byte> regs = new();
+            List<TypeNode> argTypes = new();
+            foreach (ExprNode arg in memberCall.Args)
+            {
+                regs.Add(_registers.AllocateRegister());
+                data.AddRange(GenerateExpr(arg, regs[^1]));
+
+                argTypes.Add(_semantic.ExprTypes[arg]);
+            }
+
+            string fullName = $"{_semantic.ExprTypes[memberCall.Object].Name}.{memberCall.Name}";
+            bool isReturn = DoesFunctionReturn(fullName, argTypes);
+
+            data.AddRange([
+                GetOpcode("ldfrsr"),
+                (byte)(isReturn ? 1 : 0),
+                (byte)(_currentFunction != null && _currentFunction.ReturnType != null ? 1 : 0),
+                0xFF
+            ]);
+            for (int i = 0; i < regs.Count; i++)
+                data.AddRange([GetOpcode("ldfrsr"), (byte)(isReturn ? i + 2 : i + 1), regs[i], 0xFF]);
+
+            ushort v = (ushort)AddOrGetXRef(AppendParamTypes(fullName, argTypes));
+            data.AddRange([GetOpcode("call"), 0xFF, (byte)((v >> 8) & 0xFF), (byte)(v & 0xFF)]);
+
+            if (isReturn)
+                data.AddRange([GetOpcode("ldsrfz"), destRegister, 0xFF, 0xFF]);
+
+            foreach (byte reg in regs)
+                _registers.FreeRegister(reg);
+            return data.ToArray();
+        }
+
+        protected byte[] GeneratePushInstance(PushInstanceNode pushInstance, byte destRegister)
+        {
+            ushort v = (ushort)AddOrGetXRef(pushInstance.ObjectName);
+            return [GetOpcode("sppshz"), destRegister, (byte)((v >> 8) & 0xFF), (byte)(v & 0xFF)];
+        }
+
+        protected byte[] GenerateArrayCreation(ArrayCreationNode arrayCreation, byte destRegister)
+        {
+            List<byte> data = new();
+
+            byte sizeReg = _registers.AllocateRegister();
+            if (arrayCreation.Size != null)
+                data.AddRange(GenerateExpr(arrayCreation.Size, destRegister));
+            else if (arrayCreation.Initializers != null)
+                data.AddRange(GenerateIntLiteral(new IntLiteralNode(
+                    arrayCreation.Initializers.Count,
+                    arrayCreation.Line,
+                    arrayCreation.Column
+                ), sizeReg));
+            else
+                // nothing that could indicate size given... welp guess you're getting an array with 0 elements!
+                data.AddRange(GenerateIntLiteral(new IntLiteralNode(
+                    0,
+                    arrayCreation.Line,
+                    arrayCreation.Column
+                ), sizeReg));
+            data.AddRange([GetOpcode("arpshz"), sizeReg, 0xFF, 0xFF]);
+            if (arrayCreation.Initializers != null) // yes I'm checking that 2 times fight me
+            {
+                byte arrReg = sizeReg;
+                byte initReg = _registers.AllocateRegister();
+                byte idxReg = _registers.AllocateRegister();
+                data.AddRange(GenerateIntLiteral(new IntLiteralNode(
+                    0,
+                    arrayCreation.Line,
+                    arrayCreation.Column
+                ), idxReg));
+                byte cpyReg = _registers.AllocateRegister();
+                for (int i = 0; i < arrayCreation.Initializers.Count; i++)
+                {
+                    data.AddRange(GenerateExpr(arrayCreation.Initializers[i], initReg));
+                    data.AddRange([GetOpcode("ldsrsr"), cpyReg, arrReg, 0xFF]);
+                    data.AddRange([GetOpcode("arirx"), cpyReg, idxReg, 0xFF]);
+                    data.AddRange([GetOpcode("stsrsr"), cpyReg, initReg, 0xFF]);
+                    data.AddRange([GetOpcode("inci32"), idxReg, 0xFF, 0xFF]);
+                }
+                _registers.FreeRegister(initReg);
+                _registers.FreeRegister(idxReg);
+                _registers.FreeRegister(cpyReg);
+            }
+
+            return data.ToArray();
+        }
+
+        protected byte[] GenerateIncrement(IncrementNode increment, byte destRegister)
+        {
+            List<byte> data = new();
+
+            if (!increment.IsPrefix)
+                // Return the value (x++)
+                data.AddRange(GenerateExpr(increment.Target, destRegister));
+
+            // Increment/Decrement it
+            data.AddRange(increment.Target switch
+            {
+                IdentifierNode id => GenerateIdentifierIncrement(increment, id),
+                QualifiedAccessNode qa => GenerateQualifiedIncrement(increment, qa),
+                MemberAccessNode ma => GenerateMemberIncrement(increment, ma),
+                ArrayAccessNode aa => GenerateArrayIncrement(increment, aa),
+
+                _ => throw new CodeGeneratorException($"Cannot increment target node {increment.Target}.", increment.Line, increment.Column)
+            });
+
+            if (increment.IsPrefix)
+                // Return it after changing it (++x)
+                data.AddRange(GenerateExpr(increment.Target, destRegister));
+
+            return data.ToArray();
+        }
+
+        protected byte[] GenerateIdentifierIncrement(IncrementNode increment, IdentifierNode identifier)
+            => GenerateIncrementRegister(increment, _registers.VarToReg[identifier.Name]);
+
+        protected byte[] GenerateQualifiedIncrement(IncrementNode increment, QualifiedAccessNode qualified)
+        {
+            List<byte> data = new();
+
+            byte valReg = _registers.AllocateRegister();
+            data.AddRange(GenerateQualifiedAccess(qualified, valReg));
+
+            data.AddRange(GenerateIncrementRegister(increment, valReg));
+
+            ushort v = (ushort)AddOrGetXRef(qualified.FullName);
+            data.AddRange([GetOpcode("stsvsr"), valReg, (byte)((v >> 8) & 0xFF), (byte)(v & 0xFF)]);
+
+            _registers.FreeRegister(valReg);
+            return data.ToArray();
+        }
+
+        protected byte[] GenerateMemberIncrement(IncrementNode increment, MemberAccessNode member)
+        {
+            List<byte> data = new();
+
+            byte valReg = _registers.AllocateRegister();
+            data.AddRange(GenerateMemberAccess(member, valReg));
+
+            data.AddRange(GenerateIncrementRegister(increment, valReg));
+
+            byte objReg = _registers.AllocateRegister();
+            data.AddRange(GenerateMemberSetup(member, objReg));
+
+            data.AddRange([GetOpcode("stsrsr"), objReg, valReg, 0xFF]);
+
+            _registers.FreeRegister(valReg);
+            _registers.FreeRegister(objReg);
+            return data.ToArray();
+        }
+
+        protected byte[] GenerateArrayIncrement(IncrementNode increment, ArrayAccessNode array)
+        {
+            List<byte> data = new();
+
+            byte valReg = _registers.AllocateRegister();
+            data.AddRange(GenerateArrayAccess(array, valReg));
+
+            data.AddRange(GenerateIncrementRegister(increment, valReg));
+
+            byte arrReg = _registers.AllocateRegister();
+            data.AddRange(GenerateExpr(array.Array, arrReg));
+
+            byte idxReg = _registers.AllocateRegister();
+            data.AddRange(GenerateExpr(array.Index, idxReg));
+
+            byte cpyReg = _registers.AllocateRegister();
+            data.AddRange([GetOpcode("ldsrsr"), cpyReg, arrReg, 0xFF]);
+
+            data.AddRange([GetOpcode("arirx"), cpyReg, idxReg, 0xFF]);
+            data.AddRange([GetOpcode("stsrsr"), cpyReg, valReg, 0xFF]);
+
+            if (array.Array is not ArrayCreationNode)
+                _registers.FreeRegister(arrReg);
+            _registers.FreeRegister(valReg);
+            _registers.FreeRegister(idxReg);
+            _registers.FreeRegister(cpyReg);
+            return data.ToArray();
+        }
+
+        protected byte[] GenerateMemberSetup(MemberAccessNode member, byte destRegister)
+        {
+            List<byte> data = new();
+
+            data.AddRange(GenerateExpr(member.Object, destRegister));
+
+            ushort v = (ushort)AddOrGetXRef($"{_semantic.ExprTypes[member.Object].Name}.{member.Member}");
+            data.AddRange([GetOpcode("addofs"), destRegister, (byte)((v >> 8) & 0xFF), (byte)(v & 0xFF)]);
+
+            return data.ToArray();
+        }
+
+        protected byte[] GenerateIncrementRegister(IncrementNode increment, byte reg) => _semantic.ExprTypes[increment.Target].Name switch
+        {
+            "int" => [GetOpcode(increment.IsIncrement ? "inci32" : "deci32"), reg, 0xFF, 0xFF],
+            "float" => [GetOpcode(increment.IsIncrement ? "incf32" : "decf32"), reg, 0xFF, 0xFF],
+
+            _ => throw new CodeGeneratorException(
+                $"Cannot increment value of type '{_semantic.ExprTypes[increment.Target].Name}'.",
+                increment.Line,
+                increment.Column
+            )
+        };
 
         // Everything below are various utility functions
 
@@ -349,6 +771,42 @@ namespace Mint.CodeGenerators
         }
 
         protected byte GetOpcode(string name) => OpcodeHelper.CommonOpcodeByName[Version][name];
+
+        protected bool DoesFunctionReturn(string fullName, IList<TypeNode> paramTypes)
+        {
+            bool isReturn = false;
+            GetFuncSymbol(fullName, paramTypes)?.Switch(
+                objFunc => isReturn = objFunc.ReturnType != null,
+                xrefFunc => isReturn = xrefFunc.ReturnType != null
+            );
+            return isReturn;
+        }
+
+        protected OneOf<FunctionSymbol, ExternalFunctionSymbol>? GetFuncSymbol(string fullName, IList<TypeNode> paramTypes)
+        {
+            string[] names = fullName.Split('.');
+            if (_semantic.Module.Objects.TryGetValue(names[^2], out ObjectSymbol? objSbl))
+                if (objSbl.Functions.TryGetValue(names[^1], out FunctionSymbol? objFuncSbl))
+                    return objFuncSbl;
+            if (_semantic.Module.XRefs.TryGetValue(names[^2], out XRefSymbol? xrefSbl))
+                if (xrefSbl.Functions.TryGetValue(names[^1], out ExternalFunctionSymbol? xrefFuncSbl))
+                    return xrefFuncSbl;
+            return null;
+        }
+
+        protected string AppendParamTypes(string fullName, IList<TypeNode> paramTypes)
+        {
+            StringBuilder sb = new(fullName);
+            sb.Append('(');
+            if (paramTypes.Count > 0)
+                sb.Append(paramTypes[0].Name);
+            for (int i = 1; i < paramTypes.Count; i++)
+                sb.Append($",{paramTypes[i].Name}");
+            sb.Append(')');
+            return sb.ToString();
+        }
+
+        protected static bool AreBothType(TypeNode a, TypeNode b, string type) => a.Name == type && b.Name == type;
 
         private static byte[] GetBytesFromInt(int bits)
         {

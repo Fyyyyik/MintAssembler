@@ -12,11 +12,13 @@ namespace Mint.AstNodes
     public record BoolLiteralNode(bool Value, int Line, int Column) : ExprNode(Line, Column);
     public record StringLiteralNode(string Value, int Line, int Column) : ExprNode(Line, Column);
 
-    // Variables and access
+    // Assignables
     public record IdentifierNode(string Name, int Line, int Column) : ExprNode(Line, Column);
     public record QualifiedAccessNode(string FullName, int Line, int Column) : ExprNode(Line, Column);
     public record MemberAccessNode(ExprNode Object, string Member, int Line, int Column) : ExprNode(Line, Column);
     public record ArrayAccessNode(ExprNode Array, ExprNode Index, int Line, int Column) : ExprNode(Line, Column);
+
+    // This
     public record ThisNode(int Line, int Column): ExprNode(Line, Column);
 
     // Operations

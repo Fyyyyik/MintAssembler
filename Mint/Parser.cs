@@ -724,9 +724,7 @@ namespace Mint
                         size = ParseExpression();
                         Expect(TokenType.CloseBracket);
                     }
-
-                    // Initialize array
-                    if (Match(TokenType.OpenBrace))
+                    else if (Match(TokenType.OpenBrace))
                     {
                         List<ExprNode> inits = new List<ExprNode>();
                         while (!Match(TokenType.CloseBrace))

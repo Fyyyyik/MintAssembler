@@ -14,7 +14,7 @@ namespace Mint.Semantics
 
         public SemanticAnalyser(VersionRules rules) => _rules = rules;
 
-        public SemanticResult Analyse(ModuleNode module)
+        public SemanticResult Analyse(ModuleNode module, out ModuleNode rewrittenModule)
         {
             _module = new() { Namespace = module.Namespace.FullName };
 
@@ -22,10 +22,10 @@ namespace Mint.Semantics
             BuildSymbolTable(module);
 
             // Pass 2
-            ModuleNode rewritten = new Rewriter(_module).Rewrite(module);
+            rewrittenModule = new Rewriter(_module).Rewrite(module);
 
             // Pass 3 - type checking
-            foreach (ObjectNode obj in rewritten.Objects)
+            foreach (ObjectNode obj in rewrittenModule.Objects)
                 AnalyseObject(obj);
 
             return new SemanticResult(_module, _exprTypes, _errors);
@@ -486,7 +486,7 @@ namespace Mint.Semantics
         private void AddError(string message, AstNode node)
             => _errors.Add(new SemanticError(message, node));
 
-        private static TypeNode[] ToTypeNodes(IList<ParamNode> paramNodes)
+        internal static TypeNode[] ToTypeNodes(IList<ParamNode> paramNodes)
         {
             List<TypeNode> typeNodes = new();
             foreach (ParamNode param in paramNodes)
