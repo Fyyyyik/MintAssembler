@@ -28,6 +28,17 @@ class TestClass
 		{
 			return;
 		}
+
+		for (int i = 0; i < 7; i++)
+		{
+			Scn.Step.Chara.ObjColl.AddAttack(x - 2, i, 1.0);
+		}
+
+		float count = 0.0;
+		while (GObj.FootState.IsGround())
+		{
+			++count;
+		}
 	}
 
 	float GetVec()
@@ -36,4 +47,12 @@ class TestClass
 	}
 }
 
-xref Scn.Step.Chara.ObjColl;
+xref Scn.Step.Chara.ObjColl
+{
+	void AddAttack(int,int,float)
+}
+
+xref GObj.FootState
+{
+	bool IsGround()
+}

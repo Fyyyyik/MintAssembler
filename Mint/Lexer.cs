@@ -265,7 +265,7 @@ namespace Mint
                         Advance();
                         return new Token(TokenType.NotEqual, "!=", line, col);
                     }
-                    return new Token(TokenType.Not, "!", line, col);
+                    return new Token(TokenType.Bang, "!", line, col);
                 case '>':
                     switch (Current)
                     {

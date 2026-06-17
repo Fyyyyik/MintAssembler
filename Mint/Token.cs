@@ -26,6 +26,7 @@ namespace Mint
         XRef,
         Namespace,
         This,
+        Yield,
 
         // Types, the basic ones (could also be Identifiers, resolve those later)
         Void,
@@ -47,7 +48,7 @@ namespace Mint
         Lesser,              // <
         GreaterEquals,       // >=
         LesserEquals,        // <=
-        Not,                 // !
+        Bang,                 // !
         PlusEquals,          // +=
         MinusEquals,         // -=
         StarEquals,          // *=

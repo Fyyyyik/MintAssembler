@@ -118,6 +118,7 @@ namespace Mint
                             if (newType == null)
                                 throw new ParserException(VOID_VARIABLE_MSG, typeLine, typeCol);
                             paramTypes.Add(newType);
+                            Match(TokenType.Comma);
                         }
                         members.Add(new ExternalFunctionNode(memberType, memberName, paramTypes, mLine, mCol));
                     }
@@ -585,14 +586,14 @@ namespace Mint
 
         private ExprNode ParseUnary()
         {
-            if (Current.Type is TokenType.Minus or TokenType.Not)
+            if (Current.Type is TokenType.Minus or TokenType.Bang)
             {
                 var (line, col) = CurrentPosition;
                 string op = _tokens[_pos++].Value;
                 ExprNode operand = ParseUnary();
                 return new UnaryExprNode(op, operand, line, col);
             }
-            return ParsePostfix();
+            return ParseIncrementDecrement();
         }
 
         private ExprNode ParseIncrementDecrement()
@@ -601,6 +602,7 @@ namespace Mint
             {
                 var (line, col) = CurrentPosition;
                 bool increment = Current.Type == TokenType.DoublePlus;
+                _pos++;
                 ExprNode target = ParsePostfix();
                 CheckTargetIncrement(target, line, col);
                 return new IncrementNode(target, true, increment, line, col);
@@ -613,6 +615,7 @@ namespace Mint
                 var (line, col) = CurrentPosition;
                 CheckTargetIncrement(expr, line, col);
                 bool increment = Current.Type == TokenType.DoublePlus;
+                _pos++;
                 expr = new IncrementNode(expr, false, increment, line, col);
             }
 

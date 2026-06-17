@@ -100,7 +100,11 @@ namespace Mint.CodeGenerators
                 data.AddRange(GenerateStatement(stmt));
             GenerateFreeBlockResources(_registers.ExitBlock());
             if (isBeginning)
+            {
                 data.InsertRange(0, GenerateFunctionEnter());
+                if (data[^4] != GetOpcode("fleave") && data[^4] != GetOpcode("fret"))
+                    data.AddRange([GetOpcode("fleave"), 0xFF, 0xFF, 0xFF]);
+            }
             return data.ToArray();
         }
 
@@ -254,7 +258,7 @@ namespace Mint.CodeGenerators
                 else if (ifNode.Else != null)
                     els = GenerateBlock(ifNode.Else);
                 data.AddRange(els);
-                short elsJumpLength = (short)(els.Length / InstructionSize);
+                short elsJumpLength = (short)(els.Length / InstructionSize + 1);
                 data[elseJumpInstructionIndex + 2] = (byte)((elsJumpLength >> 8) & 0xFF);
                 data[elseJumpInstructionIndex + 3] = (byte)(elsJumpLength & 0xFF);
             }
