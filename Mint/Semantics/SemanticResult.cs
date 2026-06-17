@@ -7,7 +7,7 @@ namespace Mint.Semantics
 {
     public record SemanticResult(
         ModuleSymbol Module,
-        Dictionary<ExprNode, TypeNode> ExprTypes,
+        Dictionary<ExprNode, TypeNode?> ExprTypes,
         IReadOnlyList<SemanticError> Errors
     );
 

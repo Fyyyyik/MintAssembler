@@ -20,7 +20,7 @@ namespace Mint.CodeGenerators
         protected virtual int InstructionSize => 4;
         protected virtual byte[] Version => [0, 2, 0, 0]; // must override for each version
 
-        protected RegisterManager _registers;
+        protected RegisterManager _registers = new();
         protected readonly SemanticResult _semantic;
 
         private readonly List<byte> _sdata = new();
@@ -29,12 +29,16 @@ namespace Mint.CodeGenerators
         private FunctionSymbol? _currentFunction = null;
         private HashSet<byte> _arrayRegs = new();
         private Dictionary<byte, string> _instanceRegs = new();
+        private bool _hasThis = false;
 
         public V0_2Generator(SemanticResult semantic) => _semantic = semantic;
 
-        public ModuleRtDL GenerateRtDL(ModuleNode module)
+        public ModuleRtDL GenerateRtDL(ModuleNode module, string name)
         {
-            ModuleRtDL rtdl = new();
+            ModuleRtDL rtdl = new()
+            {
+                Name = name
+            };
 
             foreach (ObjectNode obj in module.Objects)
                 rtdl.Objects.Add(GenerateObject(obj));
@@ -50,7 +54,7 @@ namespace Mint.CodeGenerators
 
             MintObject mintObj = new()
             {
-                Name = obj.Name,
+                Name = _currentObj.FullName,
                 Type = ObjectType.Class // TODO : make obj carry the type over
             };
 
@@ -71,10 +75,14 @@ namespace Mint.CodeGenerators
 
         private MintFunction GenerateFunction(FunctionNode funcNode)
         {
-            _currentFunction = _currentObj?.Functions[funcNode.Name];
+            if (_currentObj == null)
+                throw new CodeGeneratorException("Cannot generate function outside of an object.", 0, 0);
+            _currentFunction = _currentObj.Functions[funcNode.Name];
             _registers = new();
+            _hasThis = false;
 
-            MintFunction mintFunc = new(funcNode.Name)
+            string retTypeName = _currentFunction.ReturnType == null ? "void" : _currentFunction.ReturnType.Name;
+            MintFunction mintFunc = new($"{retTypeName} {AppendParamTypes(funcNode.Name, SemanticAnalyser.ToTypeNodes(_currentFunction.Parameters))}")
             {
                 Arguments = (uint)funcNode.Params.Count,
                 Data = GenerateBlock(funcNode.Body, true)
@@ -90,6 +98,44 @@ namespace Mint.CodeGenerators
             List<byte> data = new();
             foreach (StmtNode stmt in block.Statements)
                 data.AddRange(GenerateStatement(stmt));
+            GenerateFreeBlockResources(_registers.ExitBlock());
+            if (isBeginning)
+                data.InsertRange(0, GenerateFunctionEnter());
+            return data.ToArray();
+        }
+
+        protected byte[] GenerateFunctionEnter()
+        {
+            if (_currentFunction == null)
+                throw new CodeGeneratorException( // This is mainly to shut up C#, this shouldn't ever happen
+                    "Tried to generate a function entrance outside of a function.",
+                    0, 0
+                );
+            byte argCount = (byte)_currentFunction.Parameters.Count;
+            if (_currentFunction.ReturnType != null) argCount++;
+            if (_hasThis) argCount++;
+            return [GetOpcode("fenter"), (byte)_registers.RegisterCount, argCount, 0xFF];
+        }
+
+        protected byte[] GenerateFreeBlockResources(HashSet<byte> freedRegisters)
+        {
+            List<byte> data = new();
+
+            foreach (byte reg in freedRegisters)
+            {
+                if (_arrayRegs.Contains(reg))
+                {
+                    data.AddRange([GetOpcode("arpop"), reg, 0xFF, 0xFF]);
+                    _arrayRegs.Remove(reg);
+                }
+                if (_instanceRegs.TryGetValue(reg, out string? obj))
+                {
+                    ushort v = (ushort)AddOrGetXRef(obj);
+                    data.AddRange([GetOpcode("sppop"), reg, (byte)((v >> 8) & 0xFF), (byte)(v & 0xFF)]);
+                    _instanceRegs.Remove(reg);
+                }
+            }
+
             return data.ToArray();
         }
 
@@ -161,7 +207,7 @@ namespace Mint.CodeGenerators
             byte valReg = _registers.AllocateRegister();
             data.AddRange(GenerateExpr(assign.Value, valReg));
 
-            string xref = $"{_semantic.ExprTypes[targetMember.Object].Name}.{targetMember.Member}";
+            string xref = $"{_semantic.ExprTypes[targetMember.Object]?.Name}.{targetMember.Member}";
             ushort v = (ushort)AddOrGetXRef(xref);
             data.AddRange([GetOpcode("addofs"), objReg, (byte)((v >> 8) & 0xFF), (byte)(v & 0xFF)]);
             data.AddRange([GetOpcode("stsrsr"), objReg, valReg, 0xFF]);
@@ -208,7 +254,7 @@ namespace Mint.CodeGenerators
                 else if (ifNode.Else != null)
                     els = GenerateBlock(ifNode.Else);
                 data.AddRange(els);
-                short elsJumpLength = (short)(els.Length / InstructionSize + 1);
+                short elsJumpLength = (short)(els.Length / InstructionSize);
                 data[elseJumpInstructionIndex + 2] = (byte)((elsJumpLength >> 8) & 0xFF);
                 data[elseJumpInstructionIndex + 3] = (byte)(elsJumpLength & 0xFF);
             }
@@ -427,14 +473,20 @@ namespace Mint.CodeGenerators
         }
 
         protected byte[] GenerateThis(byte destRegister)
-            => [GetOpcode("ldsrsr"), destRegister, 0, 0xFF];
+        {
+            _hasThis = true;
+            return [GetOpcode("ldsrsr"), destRegister, 0, 0xFF];
+        }
 
         protected byte[] GenerateBinaryExpr(BinaryExprNode binaryExpr, byte destRegister)
         {
             List<byte> data = new();
-            TypeNode binType = _semantic.ExprTypes[binaryExpr];
-            TypeNode leftType = _semantic.ExprTypes[binaryExpr.Left];
-            TypeNode rightType = _semantic.ExprTypes[binaryExpr.Right];
+
+            TypeNode? binType = _semantic.ExprTypes[binaryExpr];
+            TypeNode? leftType = _semantic.ExprTypes[binaryExpr.Left];
+            TypeNode? rightType = _semantic.ExprTypes[binaryExpr.Right];
+            if (binType == null || leftType == null || rightType == null)
+                throw new CodeGeneratorException("Cannot have a binary expression with type 'void'.", binaryExpr.Line, binaryExpr.Column);
 
             byte leftReg = _registers.AllocateRegister();
             data.AddRange(GenerateExpr(binaryExpr.Left, leftReg));
@@ -487,7 +539,14 @@ namespace Mint.CodeGenerators
         protected byte[] GenerateUnaryExpr(UnaryExprNode unaryExpr, byte destRegister)
         {
             List<byte> data = new();
-            TypeNode operandType = _semantic.ExprTypes[unaryExpr.Operand];
+
+            TypeNode? operandType = _semantic.ExprTypes[unaryExpr.Operand];
+            if (operandType == null)
+                throw new CodeGeneratorException(
+                    "Operand must not be of type 'void' for unary expression.",
+                    unaryExpr.Line,
+                    unaryExpr.Column
+                );
 
             byte operandReg = _registers.AllocateRegister();
             data.AddRange(GenerateExpr(unaryExpr.Operand, operandReg));
@@ -517,7 +576,14 @@ namespace Mint.CodeGenerators
                 regs.Add(_registers.AllocateRegister());
                 data.AddRange(GenerateExpr(arg, regs[^1]));
 
-                argTypes.Add(_semantic.ExprTypes[arg]);
+                TypeNode? argType = _semantic.ExprTypes[arg];
+                if (argType == null)
+                    throw new CodeGeneratorException(
+                        "Argument cannot be of type 'void'.",
+                        qualifiedCall.Line,
+                        qualifiedCall.Column
+                    );
+                argTypes.Add(argType);
             }
 
             bool isReturn = DoesFunctionReturn(qualifiedCall.FullName, argTypes);
@@ -550,10 +616,24 @@ namespace Mint.CodeGenerators
                 regs.Add(_registers.AllocateRegister());
                 data.AddRange(GenerateExpr(arg, regs[^1]));
 
-                argTypes.Add(_semantic.ExprTypes[arg]);
+                TypeNode? argType = _semantic.ExprTypes[arg];
+                if (argType == null)
+                    throw new CodeGeneratorException(
+                        "Argument cannot be of type 'void'.",
+                        memberCall.Line,
+                        memberCall.Column
+                    );
+                argTypes.Add(argType);
             }
 
-            string fullName = $"{_semantic.ExprTypes[memberCall.Object].Name}.{memberCall.Name}";
+            TypeNode? objType = _semantic.ExprTypes[memberCall.Object];
+            if (objType == null)
+                throw new CodeGeneratorException(
+                    "Cannot call from object of type 'void'.",
+                    memberCall.Line,
+                    memberCall.Column
+                );
+            string fullName = $"{objType.Name}.{memberCall.Name}";
             bool isReturn = DoesFunctionReturn(fullName, argTypes);
 
             data.AddRange([
@@ -579,6 +659,7 @@ namespace Mint.CodeGenerators
         protected byte[] GeneratePushInstance(PushInstanceNode pushInstance, byte destRegister)
         {
             ushort v = (ushort)AddOrGetXRef(pushInstance.ObjectName);
+            _instanceRegs.Add(destRegister, pushInstance.ObjectName);
             return [GetOpcode("sppshz"), destRegister, (byte)((v >> 8) & 0xFF), (byte)(v & 0xFF)];
         }
 
@@ -586,7 +667,6 @@ namespace Mint.CodeGenerators
         {
             List<byte> data = new();
 
-            byte sizeReg = _registers.AllocateRegister();
             if (arrayCreation.Size != null)
                 data.AddRange(GenerateExpr(arrayCreation.Size, destRegister));
             else if (arrayCreation.Initializers != null)
@@ -594,18 +674,17 @@ namespace Mint.CodeGenerators
                     arrayCreation.Initializers.Count,
                     arrayCreation.Line,
                     arrayCreation.Column
-                ), sizeReg));
+                ), destRegister));
             else
                 // nothing that could indicate size given... welp guess you're getting an array with 0 elements!
                 data.AddRange(GenerateIntLiteral(new IntLiteralNode(
                     0,
                     arrayCreation.Line,
                     arrayCreation.Column
-                ), sizeReg));
-            data.AddRange([GetOpcode("arpshz"), sizeReg, 0xFF, 0xFF]);
+                ), destRegister));
+            data.AddRange([GetOpcode("arpshz"), destRegister, 0xFF, 0xFF]);
             if (arrayCreation.Initializers != null) // yes I'm checking that 2 times fight me
             {
-                byte arrReg = sizeReg;
                 byte initReg = _registers.AllocateRegister();
                 byte idxReg = _registers.AllocateRegister();
                 data.AddRange(GenerateIntLiteral(new IntLiteralNode(
@@ -617,7 +696,7 @@ namespace Mint.CodeGenerators
                 for (int i = 0; i < arrayCreation.Initializers.Count; i++)
                 {
                     data.AddRange(GenerateExpr(arrayCreation.Initializers[i], initReg));
-                    data.AddRange([GetOpcode("ldsrsr"), cpyReg, arrReg, 0xFF]);
+                    data.AddRange([GetOpcode("ldsrsr"), cpyReg, destRegister, 0xFF]);
                     data.AddRange([GetOpcode("arirx"), cpyReg, idxReg, 0xFF]);
                     data.AddRange([GetOpcode("stsrsr"), cpyReg, initReg, 0xFF]);
                     data.AddRange([GetOpcode("inci32"), idxReg, 0xFF, 0xFF]);
@@ -627,6 +706,7 @@ namespace Mint.CodeGenerators
                 _registers.FreeRegister(cpyReg);
             }
 
+            _arrayRegs.Add(destRegister);
             return data.ToArray();
         }
 
@@ -729,19 +809,19 @@ namespace Mint.CodeGenerators
 
             data.AddRange(GenerateExpr(member.Object, destRegister));
 
-            ushort v = (ushort)AddOrGetXRef($"{_semantic.ExprTypes[member.Object].Name}.{member.Member}");
+            ushort v = (ushort)AddOrGetXRef($"{_semantic.ExprTypes[member.Object]?.Name}.{member.Member}");
             data.AddRange([GetOpcode("addofs"), destRegister, (byte)((v >> 8) & 0xFF), (byte)(v & 0xFF)]);
 
             return data.ToArray();
         }
 
-        protected byte[] GenerateIncrementRegister(IncrementNode increment, byte reg) => _semantic.ExprTypes[increment.Target].Name switch
+        protected byte[] GenerateIncrementRegister(IncrementNode increment, byte reg) => _semantic.ExprTypes[increment.Target]?.Name switch
         {
             "int" => [GetOpcode(increment.IsIncrement ? "inci32" : "deci32"), reg, 0xFF, 0xFF],
             "float" => [GetOpcode(increment.IsIncrement ? "incf32" : "decf32"), reg, 0xFF, 0xFF],
 
             _ => throw new CodeGeneratorException(
-                $"Cannot increment value of type '{_semantic.ExprTypes[increment.Target].Name}'.",
+                $"Cannot increment value of type '{_semantic.ExprTypes[increment.Target]?.Name}'.",
                 increment.Line,
                 increment.Column
             )
@@ -779,7 +859,7 @@ namespace Mint.CodeGenerators
             if (_semantic.Module.Objects.TryGetValue(names[^2], out ObjectSymbol? objSbl))
                 if (objSbl.Functions.TryGetValue(names[^1], out FunctionSymbol? objFuncSbl))
                     return objFuncSbl;
-            if (_semantic.Module.XRefs.TryGetValue(names[^2], out XRefSymbol? xrefSbl))
+            if (_semantic.Module.XRefs.TryGetValue(string.Join('.', names[..^1]), out XRefSymbol? xrefSbl))
                 if (xrefSbl.Functions.TryGetValue(names[^1], out ExternalFunctionSymbol? xrefFuncSbl))
                     return xrefFuncSbl;
             return null;

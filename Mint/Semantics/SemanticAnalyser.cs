@@ -5,7 +5,7 @@ namespace Mint.Semantics
     public class SemanticAnalyser
     {
         private readonly VersionRules _rules;
-        private readonly Dictionary<ExprNode, TypeNode> _exprTypes = new();
+        private readonly Dictionary<ExprNode, TypeNode?> _exprTypes = new();
         private readonly List<SemanticError> _errors = new();
         private ModuleSymbol _module;
         private ObjectSymbol? _currentClass;
@@ -221,7 +221,7 @@ namespace Mint.Semantics
                 BoolLiteralNode _ => new TypeNode("bool", expr.Line, expr.Column),
                 StringLiteralNode _ => new TypeNode("string", expr.Line, expr.Column),
 
-                IdentifierNode id => ResolveIdentifierType(id.Name),
+                IdentifierNode id => ResolveIdentifierType(id),
                 QualifiedAccessNode qa => ResolveQualifiedAccessType(qa),
                 MemberAccessNode ma => ResolveMemberAccessType(ma),
                 ArrayAccessNode aa => ResolveArrayAccessType(aa),
@@ -238,13 +238,18 @@ namespace Mint.Semantics
                 _ => null
             };
 
-            if (type != null)
-                _exprTypes[expr] = type;
+            if (!_exprTypes.ContainsKey(expr))
+                _exprTypes.Add(expr, type);
 
             return type;
         }
 
-        private TypeNode? ResolveIdentifierType(string name) => _scopeStack.LookUp(name);
+        private TypeNode? ResolveIdentifierType(IdentifierNode identifier)
+        {
+            TypeNode? type = _scopeStack.LookUp(identifier.Name);
+            _exprTypes[identifier] = type;
+            return type;
+        }
 
         private TypeNode? ResolveQualifiedAccessType(QualifiedAccessNode qualifiedAccess)
         {
@@ -257,14 +262,21 @@ namespace Mint.Semantics
             // Check in objects
             if (_module.Objects.TryGetValue(names[^2], out ObjectSymbol? locObj))
                 if (locObj.Variables.TryGetValue(varName, out VariableSymbol? locVar))
+                {
+                    _exprTypes[qualifiedAccess] = locVar.Type;
                     return locVar.Type;
+                }
 
             // Check in xrefs
             if (_module.XRefs.TryGetValue(leadup, out XRefSymbol? xrefObj))
                 if (xrefObj.Variables.TryGetValue(varName, out VariableSymbol? xrefVar))
+                {
+                    _exprTypes[qualifiedAccess] = xrefVar.Type;
                     return xrefVar.Type;
+                }
 
             AddError($"Cannot resolve '{qualifiedAccess.FullName}'.", qualifiedAccess);
+            _exprTypes[qualifiedAccess] = null;
             return null;
         }
 
@@ -274,33 +286,47 @@ namespace Mint.Semantics
             if (exprType == null)
             {
                 AddError("Can't access member from 'void' type.", memberAccess);
+                _exprTypes[memberAccess] = null;
                 return null;
             }
 
             // Array length property
             if (exprType.IsArray && memberAccess.Member == "Length")
-                return new TypeNode("int", memberAccess.Line, memberAccess.Column);
+            {
+                TypeNode type = new("int", memberAccess.Line, memberAccess.Column);
+                _exprTypes[memberAccess] = type;
+                return type;
+            }
 
             // Find it in the classes (or xrefs)
             if (_module.Objects.TryGetValue(exprType.Name, out ObjectSymbol? obj))
             {
                 if (obj.Variables.TryGetValue(memberAccess.Member, out VariableSymbol? varSbl))
+                {
+                    _exprTypes[memberAccess] = varSbl.Type;
                     return varSbl.Type;
+                }
 
                 AddError($"'{exprType.Name}' has no member '{memberAccess.Member}'.", memberAccess);
+                _exprTypes[memberAccess] = null;
                 return null;
             }
 
             if (_module.XRefs.TryGetValue(exprType.Name, out XRefSymbol? xrefObj))
             {
                 if (xrefObj.Variables.TryGetValue(memberAccess.Member, out VariableSymbol? xrefVar))
+                {
+                    _exprTypes[memberAccess] = xrefVar.Type;
                     return xrefVar.Type;
+                }
 
                 AddError($"'{exprType.Name}' has no member '{memberAccess.Member}'. Did you forget to reference it in the xref ?", memberAccess);
+                _exprTypes[memberAccess] = null;
                 return null;
             }
 
             AddError($"'{exprType.Name}' is not a known object. Did you forget to reference it with the 'xref' keyword ?", memberAccess);
+            _exprTypes[memberAccess] = null;
             return null;
         }
 
@@ -315,10 +341,13 @@ namespace Mint.Semantics
             if (arrayType == null || !arrayType.IsArray)
             {
                 AddError("Cannot index into a non-array type.", arrayAccess);
+                _exprTypes[arrayAccess] = null;
                 return null;
             }
 
-            return new TypeNode(arrayType.Name, arrayAccess.Line, arrayAccess.Column, true);
+            TypeNode type = new(arrayType.Name, arrayAccess.Line, arrayAccess.Column, true);
+            _exprTypes[arrayAccess] = type;
+            return type;
         }
 
         private TypeNode? ResolveThisType(ThisNode ts)
@@ -326,9 +355,13 @@ namespace Mint.Semantics
             if (_currentClass == null)
             {
                 AddError("Cannot use keyword 'this' outside of a class.", ts);
+                _exprTypes[ts] = null;
                 return null;
             }
-            return new TypeNode(_currentClass.FullName, ts.Line, ts.Column);
+
+            TypeNode type = new(_currentClass.FullName, ts.Line, ts.Column);
+            _exprTypes[ts] = type;
+            return type;
         }
 
         private TypeNode? ResolveBinaryExprType(BinaryExprNode binaryExpr)
@@ -341,7 +374,9 @@ namespace Mint.Semantics
             {
                 if (!TypesMatch(left, right))
                     AddError($"Cannot compare '{left?.Name}' and '{right?.Name}'.", binaryExpr);
-                return new TypeNode("bool", binaryExpr.Line, binaryExpr.Column);
+                TypeNode type = new("bool", binaryExpr.Line, binaryExpr.Column);
+                _exprTypes[binaryExpr] = type;
+                return type;
             }
 
             // Bit and shift operations require int
@@ -350,16 +385,20 @@ namespace Mint.Semantics
             {
                 if (left?.Name != "int" || right?.Name != "int")
                     AddError($"Operator '{binaryExpr.Op}' requires int operands.", binaryExpr);
-                return new TypeNode("int", binaryExpr.Line, binaryExpr.Column);
+                TypeNode type = new("int", binaryExpr.Line, binaryExpr.Column);
+                _exprTypes[binaryExpr] = type;
+                return type;
             }
 
             // Arithmetic operators
             if (!TypesMatch(left, right))
             {
                 AddError($"Cannot apply operator '{binaryExpr.Op}' to operands of type '{left?.Name}' and '{right?.Name}'.", binaryExpr);
+                _exprTypes[binaryExpr] = null;
                 return null;
             }
 
+            _exprTypes[binaryExpr] = left;
             return left;
         }
 
@@ -373,6 +412,7 @@ namespace Mint.Semantics
             if (unaryExpr.Op == "!" && operand?.Name != "bool")
                 AddError("Unary operator '!' requires a bool.", unaryExpr);
 
+            _exprTypes[unaryExpr] = operand;
             return operand;
         }
 
@@ -386,6 +426,7 @@ namespace Mint.Semantics
                 if (locObj.Functions.TryGetValue(funcName, out FunctionSymbol? objFunc))
                 {
                     CheckArguments(ToTypeNodes(objFunc.Parameters), qualifiedCall.Args, qualifiedCall, funcName);
+                    _exprTypes[qualifiedCall] = objFunc.ReturnType;
                     return objFunc.ReturnType;
                 }
 
@@ -393,10 +434,12 @@ namespace Mint.Semantics
                 if (xrefCls.Functions.TryGetValue(funcName, out ExternalFunctionSymbol? xrefFunc))
                 {
                     CheckArguments(xrefFunc.ArgumentTypes, qualifiedCall.Args, qualifiedCall, funcName);
+                    _exprTypes[qualifiedCall] = xrefFunc.ReturnType;
                     return xrefFunc.ReturnType;
                 }
 
             AddError($"Cannot resolve '{qualifiedCall.FullName}'.", qualifiedCall);
+            _exprTypes[qualifiedCall] = null;
             return null;
         }
 
@@ -406,18 +449,21 @@ namespace Mint.Semantics
             if (exprType == null)
             {
                 AddError("Can't call function from 'void' type.", memberCall);
+                _exprTypes[memberCall] = null;
                 return null;
             }
 
-            if (_module.Objects.TryGetValue(exprType.Name, out ObjectSymbol? obj))
+            if (_module.Objects.TryGetValue(exprType.Name.Split('.')[^1], out ObjectSymbol? obj))
             {
                 if (obj.Functions.TryGetValue(memberCall.Name, out FunctionSymbol? funcSbl))
                 {
                     CheckArguments(ToTypeNodes(funcSbl.Parameters), memberCall.Args, memberCall, memberCall.Name);
+                    _exprTypes[memberCall] = funcSbl.ReturnType;
                     return funcSbl.ReturnType;
                 }
 
                 AddError($"Object '{obj.FullName}' does not have a function with the name '{memberCall.Name}'.", memberCall);
+                _exprTypes[memberCall] = null;
                 return null;
             }
 
@@ -426,25 +472,32 @@ namespace Mint.Semantics
                 if (xrefObj.Functions.TryGetValue(memberCall.Name, out ExternalFunctionSymbol? xrefFunc))
                 {
                     CheckArguments(xrefFunc.ArgumentTypes, memberCall.Args, memberCall, memberCall.Name);
+                    _exprTypes[memberCall] = xrefFunc.ReturnType;
                     return xrefFunc.ReturnType;
                 }
 
                 AddError($"XRef object '{xrefObj.FullName}' does not have a function with the name '{memberCall.Name}'.", memberCall);
+                _exprTypes[memberCall] = null;
                 return null;
             }
 
             AddError($"'{exprType.Name}' is not a known object. Did you forget to reference it with the 'xref' keyword ?", memberCall);
+            _exprTypes[memberCall] = null;
             return null;
         }
 
         private TypeNode? ResolveNewObjectType(NewObjectNode newObject)
         {
-            return new TypeNode(newObject.ClassName, newObject.Line, newObject.Column);
+            TypeNode type = new(newObject.ClassName, newObject.Line, newObject.Column);
+            _exprTypes[newObject] = type;
+            return type;
         }
 
         private TypeNode? ResolveArrayCreationType(ArrayCreationNode arrayCreation)
         {
-            return new TypeNode(arrayCreation.ElementType.Name, arrayCreation.Line, arrayCreation.Column, true);
+            TypeNode type = new(arrayCreation.ElementType.Name, arrayCreation.Line, arrayCreation.Column, true);
+            _exprTypes[arrayCreation] = type;
+            return type;
         }
 
         private TypeNode? ResolveIncrementType(IncrementNode increment)
@@ -453,11 +506,16 @@ namespace Mint.Semantics
             if (type == null)
             {
                 AddError("Cannot increment or decrement type 'void'.", increment);
+                _exprTypes[increment] = null;
                 return null;
             }
             if (type.Name is "int" or "float")
+            {
+                _exprTypes[increment] = type;
                 return type;
+            }
             AddError($"Increment and decrement operations are only allowed on types 'int' and 'float'. Not type '{type.Name}'.", increment);
+            _exprTypes[increment] = null;
             return null;
         }
 

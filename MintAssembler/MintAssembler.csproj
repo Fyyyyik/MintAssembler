@@ -12,6 +12,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\KirbyLib\KirbyLib\KirbyLib.csproj" />
     <ProjectReference Include="..\Mint\Mint.csproj" />
   </ItemGroup>
 

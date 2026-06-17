@@ -1,4 +1,4 @@
-namespace User.Fyik;
+namespace User.Tsuruoka;
 
 xref HEL.Math.Vector3
 {

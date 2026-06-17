@@ -2,7 +2,7 @@
   "profiles": {
     "MintAssembler": {
       "commandName": "Project",
-      "commandLineArgs": "compile 0.2.mint --verbose"
+      "commandLineArgs": "compile 0.2.mint User.Tsuruoka.MintTest --verbose"
     }
   }
 }

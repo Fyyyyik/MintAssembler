@@ -1,14 +1,15 @@
 ﻿using System.CommandLine;
+using KirbyLib.IO;
+using KirbyLib.Mint;
 using Mint;
 using Mint.AstNodes;
+using Mint.CodeGenerators;
 using Mint.Semantics;
 
 namespace MintAssembler
 {
     internal class Program
     {
-        static bool isVerbose;
-
         static void Main(string[] args)
         {
             RootCommand root = new("Mint to bytecode CLI tool");
@@ -18,24 +19,44 @@ namespace MintAssembler
             {
                 Description = "The file to compile"
             };
+            Argument<string> moduleName = new("name")
+            {
+                Description = "The name of the compiled module"
+            };
             Option<bool> verbose = new("--verbose", ["-v"])
             {
                 Description = "Show more info"
             };
+            Option<string> outputPath = new("--output", ["-o"])
+            {
+                Description = "Specify where the compiled binary should be created."
+            };
             compileCom.Arguments.Add(compileFileArg);
+            compileCom.Arguments.Add(moduleName);
             compileCom.Options.Add(verbose);
+            compileCom.Options.Add(outputPath);
             compileCom.SetAction(result =>
             {
                 FileInfo? file = result.GetValue(compileFileArg);
                 if (file is null)
                 {
-                    Console.Error.WriteLine("No file to compile provided.");
+                    Console.Error.WriteLine("No file to compile was provided.");
                     return;
                 }
-                Compile(file, result.GetValue(verbose));
+                string? name = result.GetValue(moduleName);
+                if (name is null)
+                {
+                    Console.Error.WriteLine("No name to the module was provided.");
+                    return;
+                }
+                CompileOptions options = new()
+                {
+                    InputFile = file,
+                    ModuleName = name,
+                    IsVerbose = result.GetValue(verbose)
+                };
+                Compile(options);
             });
-
-            Command insertCom = new("insert", "Insert a compiled module")
 
             root.Subcommands.Add(compileCom);
 
@@ -43,38 +64,68 @@ namespace MintAssembler
             result.Invoke();
         }
 
-        static void Compile(FileInfo inputFile, bool isVerbose)
+        static void Compile(CompileOptions options)
         {
-            if (isVerbose)
+            if (options.IsVerbose)
                 Console.WriteLine("Compile command started, checking for input file...");
 
-            if (!inputFile.Exists)
+            if (!options.InputFile.Exists)
             {
-                Console.Error.WriteLine($"{inputFile.FullName} does not exist");
+                Console.Error.WriteLine($"{options.InputFile.FullName} does not exist");
                 return;
             }
 
-            if (isVerbose)
+            if (options.IsVerbose)
                 Console.WriteLine("Input file found! Reading and building tokens from content...");
 
-            List<Token> tokens = new Lexer(File.ReadAllText(inputFile.FullName)).Tokenize();
+            List<Token> tokens = new Lexer(File.ReadAllText(options.InputFile.FullName)).Tokenize();
 
-            if (isVerbose)
+            if (options.IsVerbose)
                 Console.WriteLine($"Made {tokens.Count} tokens!\nBuilding the syntax tree...");
 
             ModuleNode module = new Parser(tokens).Parse();
 
-            if (isVerbose)
-                Console.WriteLine($"Building the syntax tree has finished. Found {module.Classes.Count} classes.\n" +
-                    "Resolving types...");
+            if (options.IsVerbose)
+                Console.WriteLine($"Building the syntax tree has finished. Found {module.Objects.Count} objects.\n" +
+                    "Rewriting and resolving types...");
 
-            SemanticResult result = new SemanticAnalyser(new VersionRules([0x00, 0x02])).Analyse(module);
+            SemanticResult result = new SemanticAnalyser(new VersionRules([0x00, 0x02])).Analyse(module, out ModuleNode rewritten);
 
+            if (options.IsVerbose || result.Errors.Count > 0)
+            {
+                Console.WriteLine($"Found {result.Errors.Count} errors when resolving types.");
+                foreach (SemanticError error in result.Errors)
+                {
+                    Console.Error.WriteLine($"Node : {error.Node}");
+                    Console.ForegroundColor = ConsoleColor.Red;
+                    Console.Error.WriteLine(error.Message + "\n");
+                    Console.ResetColor();
+                }
+                if (result.Errors.Count > 0)
+                {
+                    Console.WriteLine("Compiling has stopped. There were errors found during semantic analysis.");
+                    return;
+                }
+            }
 
-            Console.WriteLine($"Errors : {result.Errors.Count}\nExprTypes : {result.ExprTypes.Count}");
+            if (options.IsVerbose)
+                Console.WriteLine("Semantic analysis completed without issue.\nGenerating the code for Mint version 0.2.0.0 ...");
 
-            foreach (SemanticError error in result.Errors)
-                Console.WriteLine(error);
+            ModuleRtDL compiled = new V0_2Generator(result).GenerateRtDL(rewritten, options.ModuleName);
+
+            string output = options.OutputPath == string.Empty ?
+                $"{Directory.GetCurrentDirectory()}{Path.DirectorySeparatorChar}{options.ModuleName}.bin" :
+                options.OutputPath;
+
+            if (options.IsVerbose)
+                Console.WriteLine($"Finished generating the Mint module!\nSaving it to '{output}'...");
+
+            using (FileStream stream = new(output, FileMode.Create, FileAccess.Write))
+            using (EndianBinaryWriter writer = new(stream))
+                compiled.Write(writer);
+
+            if (options.IsVerbose)
+                Console.WriteLine("Finished writing.\nThe compiler is finished.");
         }
     }
 }

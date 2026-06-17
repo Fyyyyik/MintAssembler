@@ -157,7 +157,7 @@ namespace Mint.Semantics
                     qa.Line,
                     qa.Column
                 );
-            return BuildMemberAccess(starterQualified, names);
+            return BuildMemberAccess(starterQualified, names[qaIndex..]);
         }
 
         private ExprNode RewriteQualifiedCall(QualifiedCallNode qc)
