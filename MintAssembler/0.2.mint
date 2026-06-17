@@ -34,6 +34,8 @@ class TestClass
 			Scn.Step.Chara.ObjColl.AddAttack(x - 2, i, 1.0);
 		}
 
+		yield x + y;
+
 		float count = 0.0;
 		while (GObj.FootState.IsGround())
 		{

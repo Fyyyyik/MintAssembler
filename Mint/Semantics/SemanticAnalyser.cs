@@ -189,7 +189,7 @@ namespace Mint.Semantics
                     AnalyseStatement(forStmt.Initializer);
                     TypeNode? forCondType = AnalyseExpr(forStmt.Condition);
                     if (forCondType?.Name != "bool")
-                        AddError($"For condition must be a bool", forStmt);
+                        AddError("For condition must be a bool", forStmt);
                     AnalyseStatement(forStmt.Increment);
                     AnalyseBlock(forStmt.Body);
                     _scopeStack.PopScope();
@@ -208,6 +208,12 @@ namespace Mint.Semantics
 
                 case ExprStmtNode exprStmt:
                     AnalyseExpr(exprStmt.Expr);
+                    break;
+
+                case YieldNode yield:
+                    TypeNode? frameCountType = AnalyseExpr(yield.FrameCount);
+                    if (frameCountType == null || frameCountType.Name != "int")
+                        AddError("Yield frame count must be an int.", yield);
                     break;
             }
         }

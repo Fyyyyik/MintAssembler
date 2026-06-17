@@ -154,6 +154,7 @@ namespace Mint.CodeGenerators
                 ForNode forNode => GenerateFor(forNode),
                 ReturnNode returnNode => GenerateReturn(returnNode),
                 ExprStmtNode expr => GenerateExprStmt(expr),
+                YieldNode yield => GenerateYield(yield),
 
                 _ => throw new NotImplementedException("Unknown statement type.")
             };
@@ -351,6 +352,19 @@ namespace Mint.CodeGenerators
             byte[] data = GenerateExpr(exprStmt.Expr, scratch);
             _registers.FreeRegister(scratch);
             return data;
+        }
+
+        protected byte[] GenerateYield(YieldNode yieldNode)
+        {
+            List<byte> data = new();
+
+            byte countReg = _registers.AllocateRegister();
+            data.AddRange(GenerateExpr(yieldNode.FrameCount, countReg));
+
+            data.AddRange([GetOpcode("yield"), countReg, 0xFF, 0xFF]);
+
+            _registers.FreeRegister(countReg);
+            return data.ToArray();
         }
 
         protected byte[] GenerateExpr(ExprNode expr, byte destRegister) => expr switch

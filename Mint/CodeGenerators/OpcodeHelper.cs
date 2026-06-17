@@ -62,6 +62,7 @@ namespace Mint.CodeGenerators
                     { "fleave", 0x34 },
                     { "fret", 0x35 },
                     { "call", 0x36 },
+                    { "yield", 0x37 },
                     { "sppshz", 0x3B },
                     { "sppop", 0x3C },
                     { "addofs", 0x3D },

@@ -18,14 +18,15 @@ namespace Mint
             ["else"]      = TokenType.Else,
             ["while"]     = TokenType.While,
             ["for"]       = TokenType.For,
-            ["xref"]  = TokenType.XRef,
+            ["xref"]      = TokenType.XRef,
             ["namespace"] = TokenType.Namespace,
             ["this"]      = TokenType.This,
             ["void"]      = TokenType.Void,
             ["int"]       = TokenType.Int,
             ["float"]     = TokenType.Float,
             ["bool"]      = TokenType.Bool,
-            ["string"]    = TokenType.String
+            ["string"]    = TokenType.String,
+            ["yield"]     = TokenType.Yield
         };
 
         public Lexer(string source)

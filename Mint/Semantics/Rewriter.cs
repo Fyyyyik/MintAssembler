@@ -85,6 +85,7 @@ namespace Mint.Semantics
             },
             ReturnNode r => r with { Value = r.Value != null ? RewriteExpression(r.Value) : null },
             ExprStmtNode e => e with { Expr = RewriteExpression(e.Expr) },
+            YieldNode y => y with { FrameCount = RewriteExpression(y.FrameCount) },
 
             _ => stmt
         };

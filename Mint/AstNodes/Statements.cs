@@ -51,4 +51,6 @@ namespace Mint.AstNodes
     public record ReturnNode(ExprNode? Value, int Line, int Column) : StmtNode(Line, Column);
 
     public record ExprStmtNode(ExprNode Expr, int Line, int Column) : StmtNode(Line, Column);
+
+    public record YieldNode(ExprNode FrameCount, int Line, int Column) : StmtNode(Line, Column);
 }

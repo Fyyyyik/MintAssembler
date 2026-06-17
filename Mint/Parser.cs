@@ -279,6 +279,10 @@ namespace Mint
             if (Check(TokenType.Return))
                 return ParseReturn();
 
+            // yield
+            if (Check(TokenType.Yield))
+                return ParseYield();
+
             // Var declaration
             if (IsVarDecl())
                 return ParseVarDecl();
@@ -373,6 +377,16 @@ namespace Mint
                 value = ParseExpression();
             Expect(TokenType.Semicolon);
             return new ReturnNode(value, line, col);
+        }
+
+        private YieldNode ParseYield()
+        {
+            var (line, col) = CurrentPosition;
+
+            Expect(TokenType.Yield);
+            ExprNode frameCount = ParseExpression();
+            Expect(TokenType.Semicolon);
+            return new YieldNode(frameCount, line, col);
         }
 
         private VarDeclNode ParseVarDecl()
