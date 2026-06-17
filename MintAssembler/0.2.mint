@@ -5,27 +5,50 @@ xref HEL.Math.Vector3
 	float GetX()
 }
 
+xref Scn.Step.Chara.ObjColl
+{
+	void AddAttack(int,int,float)
+}
+
+xref GObj.FootState
+{
+	bool IsGround()
+}
+
+xref GObj.Target
+{
+	void Invert()
+}
+
 class TestClass
 {
 	void Exec()
 	{
-		int x = 3;
+		// this is a comment
+		int x = 3; // comments like this work too
 		int y = x + (3 + 2);
 		
 		HEL.Math.Vector3.SetX(0.5);
 
 		HEL.Math.Vector3 vec = HEL.Math.Vector3;
 		vec.x = 3.0;
+		/*
+		They also work like this.
+		*/
 		for (float f = 0.0; f < vec.x; ++f)
 		{
 			GObj.FootState.IsGround();
+			for (int i = 0; i < 4; i += 1)
+			{
+				GObj.Target.Invert();
+			}
 		}
 
 		if (this.GetVec() >= 0.5)
 		{
 			int z = x * y;
 		}
-		else if (HEL.Math.Vector3.x < 0.0)
+		else if (vec.x < 0.0)
 		{
 			int z = x / y;
 		}
@@ -52,14 +75,4 @@ class TestClass
 	{
 		return HEL.Math.Vector3.GetX() + 0.5;
 	}
-}
-
-xref Scn.Step.Chara.ObjColl
-{
-	void AddAttack(int,int,float)
-}
-
-xref GObj.FootState
-{
-	bool IsGround()
 }
