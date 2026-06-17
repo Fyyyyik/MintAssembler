@@ -14,9 +14,9 @@ namespace Mint.Semantics
 
         public SemanticAnalyser(VersionRules rules) => _rules = rules;
 
-        public SemanticResult Analyse(ModuleNode module, out ModuleNode rewrittenModule)
+        public SemanticResult Analyse(ModuleNode module, string @namespace, out ModuleNode rewrittenModule)
         {
-            _module = new() { Namespace = module.Namespace.FullName };
+            _module = new() { Namespace = @namespace };
 
             // Pass 1
             BuildSymbolTable(module);
@@ -54,7 +54,8 @@ namespace Mint.Semantics
                             objSymbol.Functions[function.Name] = new FunctionSymbol
                             {
                                 Name = function.Name,
-                                ReturnType = function.ReturnType
+                                ReturnType = function.ReturnType,
+                                HasThis = function.HasThis
                             };
                             break;
                     }
@@ -237,6 +238,7 @@ namespace Mint.Semantics
                 QualifiedCallNode qc => ResolveQualifiedCallType(qc),
                 MemberCallNode mc => ResolveMemberCallType(mc),
                 NewObjectNode no => ResolveNewObjectType(no),
+                PushInstanceNode pi => ResolvePushInstanceType(pi),
                 ArrayCreationNode ac => ResolveArrayCreationType(ac),
                 IncrementNode inc => ResolveIncrementType(inc),
                 // TODO : add more types of expressions for versions with oop
@@ -496,6 +498,13 @@ namespace Mint.Semantics
         {
             TypeNode type = new(newObject.ClassName, newObject.Line, newObject.Column);
             _exprTypes[newObject] = type;
+            return type;
+        }
+
+        private TypeNode? ResolvePushInstanceType(PushInstanceNode pushInstance)
+        {
+            TypeNode type = new(pushInstance.ObjectName, pushInstance.Line, pushInstance.Column);
+            _exprTypes[pushInstance] = type;
             return type;
         }
 

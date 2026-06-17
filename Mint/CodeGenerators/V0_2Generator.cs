@@ -29,7 +29,6 @@ namespace Mint.CodeGenerators
         private FunctionSymbol? _currentFunction = null;
         private HashSet<byte> _arrayRegs = new();
         private Dictionary<byte, string> _instanceRegs = new();
-        private bool _hasThis = false;
 
         public V0_2Generator(SemanticResult semantic) => _semantic = semantic;
 
@@ -79,7 +78,13 @@ namespace Mint.CodeGenerators
                 throw new CodeGeneratorException("Cannot generate function outside of an object.", 0, 0);
             _currentFunction = _currentObj.Functions[funcNode.Name];
             _registers = new();
-            _hasThis = false;
+            _registers.PushNewBlock();
+
+            if (_currentFunction.HasThis)
+                _registers.AllocateRegister(); // should be r0
+
+            foreach (ParamNode param in _currentFunction.Parameters)
+                _registers.AllocateRegister(param.Name);
 
             string retTypeName = _currentFunction.ReturnType == null ? "void" : _currentFunction.ReturnType.Name;
             MintFunction mintFunc = new($"{retTypeName} {AppendParamTypes(funcNode.Name, SemanticAnalyser.ToTypeNodes(_currentFunction.Parameters))}")
@@ -98,7 +103,7 @@ namespace Mint.CodeGenerators
             List<byte> data = new();
             foreach (StmtNode stmt in block.Statements)
                 data.AddRange(GenerateStatement(stmt));
-            GenerateFreeBlockResources(_registers.ExitBlock());
+            data.AddRange(GenerateFreeBlockResources(_registers.ExitBlock()));
             if (isBeginning)
             {
                 data.InsertRange(0, GenerateFunctionEnter());
@@ -117,7 +122,7 @@ namespace Mint.CodeGenerators
                 );
             byte argCount = (byte)_currentFunction.Parameters.Count;
             if (_currentFunction.ReturnType != null) argCount++;
-            if (_hasThis) argCount++;
+            if (_currentFunction.HasThis) argCount++;
             return [GetOpcode("fenter"), (byte)_registers.RegisterCount, argCount, 0xFF];
         }
 
@@ -490,11 +495,7 @@ namespace Mint.CodeGenerators
             return data.ToArray();
         }
 
-        protected byte[] GenerateThis(byte destRegister)
-        {
-            _hasThis = true;
-            return [GetOpcode("ldsrsr"), destRegister, 0, 0xFF];
-        }
+        protected byte[] GenerateThis(byte destRegister) => [GetOpcode("ldsrsr"), destRegister, 0, 0xFF];
 
         protected byte[] GenerateBinaryExpr(BinaryExprNode binaryExpr, byte destRegister)
         {

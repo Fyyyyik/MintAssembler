@@ -24,7 +24,6 @@ namespace Mint
         While,
         For,
         XRef,
-        Namespace,
         This,
         Yield,
 

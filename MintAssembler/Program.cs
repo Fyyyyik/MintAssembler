@@ -89,7 +89,8 @@ namespace MintAssembler
                 Console.WriteLine($"Building the syntax tree has finished. Found {module.Objects.Count} objects.\n" +
                     "Rewriting and resolving types...");
 
-            SemanticResult result = new SemanticAnalyser(new VersionRules([0x00, 0x02])).Analyse(module, out ModuleNode rewritten);
+            string namesp = string.Join('.', options.ModuleName.Split('.')[..^1]);
+            SemanticResult result = new SemanticAnalyser(new VersionRules([0x00, 0x02])).Analyse(module, namesp, out ModuleNode rewritten);
 
             if (options.IsVerbose || result.Errors.Count > 0)
             {

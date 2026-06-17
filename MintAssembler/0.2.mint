@@ -1,5 +1,3 @@
-namespace User.Tsuruoka;
-
 xref HEL.Math.Vector3
 {
 	float x,
@@ -15,6 +13,13 @@ class TestClass
 		int y = x + (3 + 2);
 		
 		HEL.Math.Vector3.SetX(0.5);
+
+		HEL.Math.Vector3 vec = HEL.Math.Vector3;
+		vec.x = 3.0;
+		for (float f = 0.0; f < vec.x; ++f)
+		{
+			GObj.FootState.IsGround();
+		}
 
 		if (this.GetVec() >= 0.5)
 		{

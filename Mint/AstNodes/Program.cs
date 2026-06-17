@@ -5,7 +5,6 @@ using System.Text;
 namespace Mint.AstNodes
 {
     public record ModuleNode(
-        NamespaceNode Namespace,
         List<ObjectNode> Objects,
         List<ObjectNode> XRefs,
         int Line,
@@ -15,12 +14,6 @@ namespace Mint.AstNodes
     public record ObjectNode(
         string Name,
         List<MemberNode> Members,
-        int Line,
-        int Column
-    ) : AstNode(Line, Column);
-
-    public record NamespaceNode(
-        string FullName,
         int Line,
         int Column
     ) : AstNode(Line, Column);

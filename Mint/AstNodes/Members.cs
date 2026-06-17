@@ -17,6 +17,7 @@ namespace Mint.AstNodes
         TypeNode? ReturnType,
         string Name,
         List<ParamNode> Params,
+        bool HasThis,
         BlockNode Body,
         int Line,
         int Column

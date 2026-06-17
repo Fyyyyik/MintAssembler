@@ -13,6 +13,7 @@ namespace Mint
 
         private readonly List<Token> _tokens;
         private int _pos;
+        private bool _foundThis;
 
         public Parser(List<Token> tokens) => _tokens = tokens;
 
@@ -28,7 +29,7 @@ namespace Mint
         {
             if (!Check(type))
                 throw new ParserException(
-                    $"Expected '{type}' but got '{Current.Value}'",
+                    $"Expected '{type}' but got '{Current.Type}'",
                     Current.Line, Current.Column);
             return _tokens[_pos++];
         }
@@ -58,11 +59,12 @@ namespace Mint
 
         public ModuleNode Parse()
         {
-            NamespaceNode modNamespace = ParseNamespace();
-
             List<ObjectNode> objects = new();
             List<ObjectNode> xrefs = new();
             while (!Check(TokenType.EOF))
+            {
+                var (line, col) = CurrentPosition;
+
                 switch (Current.Type)
                 {
                     case TokenType.XRef:
@@ -71,22 +73,12 @@ namespace Mint
                     case TokenType.Class:
                         objects.Add(ParseObject());
                         break;
+                    default:
+                        throw new ParserException($"Unknown token : {Current.Type}", line, col);
                 }
+            }
 
-            return new ModuleNode(modNamespace, objects, xrefs, 0, 0);
-        }
-
-        private NamespaceNode ParseNamespace()
-        {
-            var (line, col) = CurrentPosition;
-
-            Expect(TokenType.Namespace);
-
-            string name = ReadFullName();
-
-            Expect(TokenType.Semicolon);
-
-            return new NamespaceNode(name, line, col);
+            return new ModuleNode(objects, xrefs, 0, 0);
         }
 
         private ObjectNode ParseXRef()
@@ -187,8 +179,9 @@ namespace Mint
         private FunctionNode ParseFunction(TypeNode? returnType, string name, int line, int col)
         {
             List<ParamNode> parameters = ParseParameterList();
+            _foundThis = false;
             BlockNode block = ParseBlock();
-            return new FunctionNode(returnType, name, parameters, block, line, col);
+            return new FunctionNode(returnType, name, parameters, _foundThis, block, line, col);
         }
 
         private List<ParamNode> ParseParameterList()
@@ -296,10 +289,21 @@ namespace Mint
             if (Current.Type is TokenType.Int or TokenType.Float or TokenType.Bool or TokenType.String)
                 return true;
 
-            // If we have Identifier immediately followed by another Identifier
-            // then that is a declaration.
-            if (Check(TokenType.Identifier) && Peek().Type == TokenType.Identifier)
-                return true;
+            if (Check(TokenType.Identifier))
+            {
+                int i = 1;
+                while (Peek(i).Type is TokenType.Identifier or TokenType.Dot)
+                {
+                    if ((Peek(i).Type == TokenType.Identifier && i % 2 == 0) ||
+                        (Peek(i).Type == TokenType.Dot && i % 2 == 1))
+                        i++;
+                    else if ((Peek(i).Type == TokenType.Identifier && i % 2 == 1) ||
+                             (Peek(i).Type == TokenType.OpenBracket &&
+                              Peek(i + 1).Type == TokenType.CloseBracket &&
+                              Peek(i + 2).Type == TokenType.Identifier))
+                        return true;
+                }
+            }
 
             // Also check for arrays like "MyClass[] classes"
             if (Check(TokenType.Identifier) &&
@@ -791,6 +795,7 @@ namespace Mint
 
             if (Match(TokenType.This))
             {
+                _foundThis = true;
                 if (Match(TokenType.Dot))
                 {
                     // we are accessing something from 'this'

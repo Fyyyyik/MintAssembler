@@ -36,6 +36,7 @@ namespace Mint.Semantics
     {
         public required string Name { get; init; }
         public required TypeNode? ReturnType { get; init; }
+        public required bool HasThis { get; init; }
         public List<ParamNode> Parameters { get; } = new();
     }
 

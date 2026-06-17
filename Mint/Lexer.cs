@@ -19,7 +19,6 @@ namespace Mint
             ["while"]     = TokenType.While,
             ["for"]       = TokenType.For,
             ["xref"]      = TokenType.XRef,
-            ["namespace"] = TokenType.Namespace,
             ["this"]      = TokenType.This,
             ["void"]      = TokenType.Void,
             ["int"]       = TokenType.Int,
