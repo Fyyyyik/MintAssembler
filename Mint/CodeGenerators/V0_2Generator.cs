@@ -44,15 +44,6 @@ namespace Mint.CodeGenerators
             return rtdl;
         }
 
-        /*
-        public Module Generate(ModuleNode module)
-        {
-            Module mintModule = new();
-
-            foreach (ObjectNode)
-        }
-        */
-
         private MintObject GenerateObject(ObjectNode obj)
         {
             _currentObj = _semantic.Module.Objects[obj.Name];
