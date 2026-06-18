@@ -1,7 +1,4 @@
 <Solution>
-  <Folder Name="/Test/">
-    <File Path="MyMint.mint" />
-  </Folder>
   <Project Path="KirbyLib/KirbyLib/KirbyLib.csproj" />
   <Project Path="Mint/Mint.csproj" />
   <Project Path="MintAssembler/MintAssembler.csproj" Id="39032d49-160c-468a-9064-eccaa5581ccc" />

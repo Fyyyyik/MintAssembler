@@ -23,18 +23,28 @@ namespace MintAssembler
             {
                 Description = "The name of the compiled module"
             };
+            Argument<string> version = new("version")
+            {
+                Description = "The target version of the module"
+            };
             Option<bool> verbose = new("--verbose", ["-v"])
             {
                 Description = "Show more info"
             };
             Option<string> outputPath = new("--output", ["-o"])
             {
-                Description = "Specify where the compiled binary should be created."
+                Description = "Specify where the compiled binary should be created"
+            };
+            Option<FileInfo> targetArchive = new("--archive", ["-a"])
+            {
+                Description = "The destination archive of the module"
             };
             compileCom.Arguments.Add(compileFileArg);
             compileCom.Arguments.Add(moduleName);
+            compileCom.Arguments.Add(version);
             compileCom.Options.Add(verbose);
             compileCom.Options.Add(outputPath);
+            compileCom.Options.Add(targetArchive);
             compileCom.SetAction(result =>
             {
                 FileInfo? file = result.GetValue(compileFileArg);
@@ -49,11 +59,21 @@ namespace MintAssembler
                     Console.Error.WriteLine("No name to the module was provided.");
                     return;
                 }
+                string? ver = result.GetValue(version);
+                if (ver is null)
+                {
+                    Console.Error.WriteLine("No version to the module was provided.");
+                    return;
+                }
+
                 CompileOptions options = new()
                 {
                     InputFile = file,
                     ModuleName = name,
-                    IsVerbose = result.GetValue(verbose)
+                    Version = ver,
+                    IsVerbose = result.GetValue(verbose),
+                    OutputPath = result.GetValue(outputPath),
+                    TargetArchive = result.GetValue(targetArchive)
                 };
                 Compile(options);
             });
@@ -114,7 +134,7 @@ namespace MintAssembler
 
             ModuleRtDL compiled = new V0_2Generator(result).GenerateRtDL(rewritten, options.ModuleName);
 
-            string output = options.OutputPath == string.Empty ?
+            string output = options.OutputPath == null ?
                 $"{Directory.GetCurrentDirectory()}{Path.DirectorySeparatorChar}{options.ModuleName}.bin" :
                 options.OutputPath;
 
