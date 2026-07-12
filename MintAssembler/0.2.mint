@@ -1,33 +1,52 @@
-xref HEL.Math.Vector3
+module User.Tsuruoka.MintTest;
+
+namespace HEL.Math
 {
-	float x,
-	void SetX(float),
-	float GetX()
+	mint object Vector3
+	{
+		float x;
+		void SetX(float);
+		float GetX();
+	}
 }
 
-xref Scn.Step.Chara.ObjColl
+namespace Scn.Step.Hero
 {
-	void AddAttack(int,int,float)
+	mint object ButtonMask
+	{
+		int L();
+		int R();
+		int D();
+		int U();
+	}
 }
 
-xref GObj.FootState
+namespace GObj
 {
-	bool IsGround()
+	mint object FootState
+	{
+		bool IsGround();
+	}
+
+	mint object Target
+	{
+		void Invert();
+	}
 }
 
-xref GObj.Target
+extern object Scn.Step.Chara.ObjColl
 {
-	void Invert()
+	void AddAttack(int, int, float);
 }
 
-class TestClass
+object TestClass
 {
 	void Exec()
 	{
 		// this is a comment
 		int x = 3; // comments like this work too
 		int y = x + (3 + 2);
-		
+	
 		HEL.Math.Vector3.SetX(0.5);
 
 		HEL.Math.Vector3 vec = HEL.Math.Vector3;

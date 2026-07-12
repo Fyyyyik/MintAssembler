@@ -32,15 +32,16 @@ namespace Mint.CodeGenerators
 
         public V0_2Generator(SemanticResult semantic) => _semantic = semantic;
 
-        public ModuleRtDL GenerateRtDL(ModuleNode module, string name)
+        public ModuleRtDL GenerateRtDL(ModuleNode module)
         {
             ModuleRtDL rtdl = new()
             {
-                Name = name
+                Name = module.FullName
             };
 
             foreach (ObjectNode obj in module.Objects)
-                rtdl.Objects.Add(GenerateObject(obj));
+                if (obj.Location == ObjectLocation.Local)
+                    rtdl.Objects.Add(GenerateObject(obj));
             
             rtdl.SData = _sdata;
             rtdl.XRef = _xrefs;
@@ -49,7 +50,7 @@ namespace Mint.CodeGenerators
 
         private MintObject GenerateObject(ObjectNode obj)
         {
-            _currentObj = _semantic.Module.Objects[obj.Name];
+            _currentObj = _semantic.Module.LocalObjects[obj.Name];
 
             MintObject mintObj = new()
             {
@@ -872,14 +873,14 @@ namespace Mint.CodeGenerators
             return isReturn;
         }
 
-        protected OneOf<FunctionSymbol, ExternalFunctionSymbol>? GetFuncSymbol(string fullName, IList<TypeNode> paramTypes)
+        protected OneOf<FunctionSymbol, XRefFunctionSymbol>? GetFuncSymbol(string fullName, IList<TypeNode> paramTypes)
         {
             string[] names = fullName.Split('.');
-            if (_semantic.Module.Objects.TryGetValue(names[^2], out ObjectSymbol? objSbl))
+            if (_semantic.Module.LocalObjects.TryGetValue(names[^2], out ObjectSymbol? objSbl))
                 if (objSbl.Functions.TryGetValue(names[^1], out FunctionSymbol? objFuncSbl))
                     return objFuncSbl;
-            if (_semantic.Module.XRefs.TryGetValue(string.Join('.', names[..^1]), out XRefSymbol? xrefSbl))
-                if (xrefSbl.Functions.TryGetValue(names[^1], out ExternalFunctionSymbol? xrefFuncSbl))
+            if (_semantic.Module.XRefObjects.TryGetValue(string.Join('.', names[..^1]), out XRefSymbol? xrefSbl))
+                if (xrefSbl.Functions.TryGetValue(names[^1], out XRefFunctionSymbol? xrefFuncSbl))
                     return xrefFuncSbl;
             return null;
         }

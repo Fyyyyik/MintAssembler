@@ -16,6 +16,7 @@ namespace Mint.AstNodes
     public record FunctionNode(
         TypeNode? ReturnType,
         string Name,
+        bool IsConst,
         List<ParamNode> Params,
         bool HasThis,
         BlockNode Body,
@@ -28,8 +29,9 @@ namespace Mint.AstNodes
     public record ExternalFunctionNode(
         TypeNode? ReturnType,
         string Name,
+        bool IsConst,
         // A list of type instead of Params since here we only care
-        // about what type goes where. Also in mint params have no name.
+        // about what type goes where. Also in mint, params have no name.
         List<TypeNode> ParamTypes,
         int Line,
         int Column

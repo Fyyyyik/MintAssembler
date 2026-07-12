@@ -5,16 +5,26 @@ using System.Text;
 namespace Mint.AstNodes
 {
     public record ModuleNode(
-        List<ObjectNode> Objects,
-        List<ObjectNode> XRefs,
+        string FullName,
+        List<ObjectNode> Objects, // local and xrefs!
         int Line,
         int Column
     ) : AstNode(Line, Column);
 
+    // Only the objects with Location set to Local get compiled
+    // the rest are xrefs given to the compiler for context.
     public record ObjectNode(
-        string Name,
+        string Name, // full name with namespaces for xrefs
         List<MemberNode> Members,
+        ObjectLocation Location,
         int Line,
         int Column
     ) : AstNode(Line, Column);
+
+    public enum ObjectLocation
+    {
+        Local,
+        Mint,
+        Extern
+    }
 }

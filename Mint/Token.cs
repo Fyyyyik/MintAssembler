@@ -17,15 +17,21 @@ namespace Mint
 
         // Keywords
         New,
-        Class,
+        Object,
         Return,
         If,
         Else,
         While,
         For,
-        XRef,
+        Local,
+        Mint,
+        Extern,
         This,
         Yield,
+        Namespace,
+        Const,
+        Ref,
+        Module,
 
         // Types, the basic ones (could also be Identifiers, resolve those later)
         Void,

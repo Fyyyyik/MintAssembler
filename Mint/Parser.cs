@@ -9,7 +9,8 @@ namespace Mint
 {
     public class Parser
     {
-        private const string VOID_VARIABLE_MSG = "A variable can't have no type.";
+        // This error can occur in so many places, that's why I define it here as const.
+        private const string VOID_VARIABLE_MSG = "A variable needs to have a type.";
 
         private readonly List<Token> _tokens;
         private int _pos;
@@ -18,6 +19,8 @@ namespace Mint
         public Parser(List<Token> tokens) => _tokens = tokens;
 
         private (int Line, int Column) CurrentPosition => (Current.Line, Current.Column);
+
+        private bool IsObjectToken => Current.Type is TokenType.Object;
 
         private Token Current => _tokens[_pos];
 
@@ -59,99 +62,104 @@ namespace Mint
 
         public ModuleNode Parse()
         {
+            Expect(TokenType.Module);
+            string fullName = ReadFullName();
+            Expect(TokenType.Semicolon);
+
             List<ObjectNode> objects = new();
-            List<ObjectNode> xrefs = new();
             while (!Check(TokenType.EOF))
             {
                 var (line, col) = CurrentPosition;
 
-                switch (Current.Type)
-                {
-                    case TokenType.XRef:
-                        xrefs.Add(ParseXRef());
-                        break;
-                    case TokenType.Class:
-                        objects.Add(ParseObject());
-                        break;
-                    default:
-                        throw new ParserException($"Unknown token : {Current.Type}", line, col);
-                }
+                if (Check(TokenType.Namespace))
+                    objects.AddRange(ParseNamespace());
+                else
+                    objects.Add(ParseObject());
             }
 
-            return new ModuleNode(objects, xrefs, 0, 0);
+            return new ModuleNode(fullName, objects, 0, 0);
         }
 
-        private ObjectNode ParseXRef()
+        // the compiler doesn't actually care about namespaces, only the objects and their full name
+        private List<ObjectNode> ParseNamespace(string currentName = "")
         {
             var (line, col) = CurrentPosition;
 
-            Expect(TokenType.XRef);
-            string className = ReadFullName();
+            Expect(TokenType.Namespace);
+            string fullName;
+            if (currentName != "")
+                fullName = $"{currentName}.{ReadFullName()}";
+            else
+                fullName = ReadFullName();
+            Expect(TokenType.OpenBrace);
 
-            if (Match(TokenType.OpenBrace))
+            List<ObjectNode> objects = new();
+            while (!Check(TokenType.EOF) && !Check(TokenType.CloseBrace))
             {
-                List<MemberNode> members = new();
-                while (!Check(TokenType.CloseBrace) && !Check(TokenType.EOF))
+                var (nameLine, nameCol) = CurrentPosition;
+
+                if (Check(TokenType.Namespace))
+                    objects.AddRange(ParseNamespace(fullName));
+                else
                 {
-                    var (mLine, mCol) = CurrentPosition;
-
-                    TypeNode? memberType = ParseType();
-                    string memberName = Expect(TokenType.Identifier).Value;
-
-                    if (Match(TokenType.OpenParen))
-                    {
-                        // Function, get the types of the parameters, if any
-                        List<TypeNode> paramTypes = new();
-                        while (!Match(TokenType.CloseParen))
-                        {
-                            var (typeLine, typeCol) = CurrentPosition;
-
-                            TypeNode? newType = ParseType();
-                            if (newType == null)
-                                throw new ParserException(VOID_VARIABLE_MSG, typeLine, typeCol);
-                            paramTypes.Add(newType);
-                            Match(TokenType.Comma);
-                        }
-                        members.Add(new ExternalFunctionNode(memberType, memberName, paramTypes, mLine, mCol));
-                    }
-                    else
-                    {
-                        // Variable
-                        if (memberType == null)
-                            throw new ParserException(VOID_VARIABLE_MSG, line, col);
-
-                        members.Add(new VariableNode(memberType, memberName, mLine, mCol));
-                    }
-
-                    if (!Check(TokenType.CloseBrace))
-                        Expect(TokenType.Comma);
+                    ObjectNode newObj = ParseObject();
+                    objects.Add(newObj with { Name = $"{fullName}.{newObj.Name}" });
                 }
-                Expect(TokenType.CloseBrace);
-                return new ObjectNode(className, members, line, col);
             }
+            Expect(TokenType.CloseBrace);
 
-            Expect(TokenType.Semicolon);
-            return new ObjectNode(className, new List<MemberNode>(), line, col);
+            return objects;
         }
 
         private ObjectNode ParseObject()
         {
             var (line, col) = CurrentPosition;
 
-            Expect(TokenType.Class);
-            string name = Expect(TokenType.Identifier).Value;
+            // figure out the location
+            ObjectLocation loc = ObjectLocation.Local; // default location is Local
+            switch (Current.Type)
+            {
+                case TokenType.Local:
+                    loc = ObjectLocation.Local;
+                    _pos++;
+                    break;
+                case TokenType.Mint:
+                    loc = ObjectLocation.Mint;
+                    _pos++;
+                    break;
+                case TokenType.Extern:
+                    loc = ObjectLocation.Extern;
+                    _pos++;
+                    break;
+                default:
+                    if (!IsObjectToken)
+                        throw new ParserException($"Unknown object location token : '{Current.Type}'.", line, col);
+                    break;
+            }
+            bool isLoc = loc == ObjectLocation.Local;
+
+            (line, col) = CurrentPosition;
+            if (!IsObjectToken)
+                throw new ParserException($"Expected an object type but got '{Current.Type}'.", line, col);
+            _pos++;
+
+            string name = string.Empty;
+            if (isLoc)
+                name = Expect(TokenType.Identifier).Value;
+            else
+                name = ReadFullName();
             Expect(TokenType.OpenBrace);
 
             List<MemberNode> members = new();
             while (!Check(TokenType.CloseBrace) && !Check(TokenType.EOF))
-                members.Add(ParseMember());
+                members.Add(ParseMember(isLoc));
 
             Expect(TokenType.CloseBrace);
 
-            return new ObjectNode(name, members, line, col);
+            return new ObjectNode(name, members, loc, line, col);
         }
 
-        private MemberNode ParseMember()
+        private MemberNode ParseMember(bool isLocal)
         {
             var (line, col) = CurrentPosition;
 
@@ -163,7 +171,12 @@ namespace Mint
             // Check whether it's a variable or a function.
             // If we find a '(' then it's a function.
             if (Check(TokenType.OpenParen))
-                return ParseFunction(type, name, line, col);
+            {
+                if (isLocal)
+                    return ParseFunction(type, name, line, col);
+                else
+                    return ParseExternalFunction(type, name, line, col); // don't expect a body
+            }
             else if (type == null)
                 throw new ParserException(VOID_VARIABLE_MSG, line, col);
             else
@@ -179,9 +192,18 @@ namespace Mint
         private FunctionNode ParseFunction(TypeNode? returnType, string name, int line, int col)
         {
             List<ParamNode> parameters = ParseParameterList();
+            bool isConst = Match(TokenType.Const);
             _foundThis = false;
             BlockNode block = ParseBlock();
-            return new FunctionNode(returnType, name, parameters, _foundThis, block, line, col);
+            return new FunctionNode(returnType, name, isConst, parameters, _foundThis, block, line, col);
+        }
+
+        private ExternalFunctionNode ParseExternalFunction(TypeNode? returnType, string name, int line, int col)
+        {
+            List<TypeNode> types = ParseTypeList();
+            bool isConst = Match(TokenType.Const);
+            Expect(TokenType.Semicolon);
+            return new ExternalFunctionNode(returnType, name, isConst, types, line, col);
         }
 
         private List<ParamNode> ParseParameterList()
@@ -206,16 +228,39 @@ namespace Mint
             return parameters;
         }
 
+        private List<TypeNode> ParseTypeList()
+        {
+            Expect(TokenType.OpenParen);
+
+            List<TypeNode> types = new();
+            while (!Check(TokenType.CloseParen) && !Check(TokenType.EOF))
+            {
+                var (line, col) = CurrentPosition;
+
+                TypeNode? type = ParseType();
+                if (type == null)
+                    throw new ParserException(VOID_VARIABLE_MSG, line, col);
+                types.Add(type);
+
+                if (!Match(TokenType.Comma)) break;
+            }
+
+            Expect(TokenType.CloseParen);
+            return types;
+        }
+
         private TypeNode? ParseType()
         {
+            var (line, col) = CurrentPosition;
+
+            bool isConst = Match(TokenType.Const);
+            bool isRef = Match(TokenType.Ref);
+
             if (Match(TokenType.Void))
                 return null;
 
-            var (line, col) = CurrentPosition;
-
             string name = Current.Type switch
             {
-                TokenType.Void => "void",
                 TokenType.Int => "int",
                 TokenType.Float => "float",
                 TokenType.Bool => "bool",
@@ -237,7 +282,7 @@ namespace Mint
                 isArray = true;
             }
 
-            return new TypeNode(name, line, col, isArray);
+            return new TypeNode(name, isConst, isRef, line, col, isArray);
         }
 
         private BlockNode ParseBlock()
@@ -736,7 +781,7 @@ namespace Mint
                 {
                     // Array can be 'new int[]', 'new int[3]', 'new int[] { 0, 1, 2 }' or 'new int[3] { 0, 1, 2 }'
 
-                    type = new TypeNode(type.Name, type.Line, type.Column);
+                    type = type with { IsArray = false };
 
                     _pos++;
                     ExprNode? size = null;

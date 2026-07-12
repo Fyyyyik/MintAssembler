@@ -1,4 +1,5 @@
 ﻿using Mint.AstNodes;
+using Mint.Util;
 using System;
 using System.Collections.Generic;
 using System.Text;
@@ -6,11 +7,14 @@ using System.Text;
 namespace Mint.Semantics
 {
     // Goes through the AST and swaps some nodes with the info that the parser doesn't have.
+    // Also handles type names to have full paths so that semantic and the generator don't
+    // have to handle that mess.
     public class Rewriter
     {
         private readonly ModuleSymbol _moduleSymbols;
         private readonly ScopeStack _scope = new();
-        private ObjectSymbol? _currentObj;
+        private ObjectSymbol? _currentObj = null;
+        private XRefSymbol? _currentXRef = null;
 
         public Rewriter(ModuleSymbol moduleSymbols) => _moduleSymbols = moduleSymbols;
 
@@ -25,32 +29,70 @@ namespace Mint.Semantics
 
         private ObjectNode RewriteObject(ObjectNode obj)
         {
-            _currentObj = _moduleSymbols.Objects[obj.Name];
+            if (obj.Location == ObjectLocation.Local)
+                _currentObj = _moduleSymbols.LocalObjects[obj.Name];
+            else
+                _currentXRef = _moduleSymbols.XRefObjects[obj.Name];
 
             List<MemberNode> rewrittenMembers = new();
             foreach (MemberNode member in obj.Members)
                 rewrittenMembers.Add(RewriteMember(member));
 
             _currentObj = null;
+            _currentXRef = null;
             return obj with { Members = rewrittenMembers };
         }
 
         private MemberNode RewriteMember(MemberNode member) => member switch
         {
+            VariableNode var => var with { Type = RewriteType(var.Type) },
             FunctionNode func => RewriteFunction(func),
+            ExternalFunctionNode xrefFunc => RewriteExternalFunction(xrefFunc),
 
             _ => member
         };
 
+        private TypeNode RewriteType(TypeNode type)
+        {
+            if (IsNeighborObject(type.Name))
+            {
+                if (_currentObj != null)
+                    return type with { Name = $"{NameOperations.GetParent(_moduleSymbols.Name)}.{type.Name}" };
+                if (_currentXRef != null)
+                    return type with { Name = $"{NameOperations.GetParent(_currentXRef.FullName)}.{type.Name}" };
+            }
+            return type;
+        }
+
         private FunctionNode RewriteFunction(FunctionNode func)
         {
             _scope.PushScope();
-            foreach (ParamNode param in func.Params)
-                _scope.Define(param.Name, param.Type);
 
-            FunctionNode rewritten = func with { Body = RewriteBlock(func.Body) };
+            List<ParamNode> rewrittenParams = new();
+            foreach (ParamNode param in func.Params)
+            {
+                rewrittenParams.Add(param with { Type = RewriteType(param.Type) });
+                _scope.Define(param.Name, param.Type);
+            }
+
+            FunctionNode rewritten = func with { Body = RewriteBlock(func.Body), Params = rewrittenParams };
+            if (rewritten.ReturnType != null)
+                rewritten = rewritten with { ReturnType = RewriteType(rewritten.ReturnType) };
 
             _scope.PopScope();
+            return rewritten;
+        }
+
+        private ExternalFunctionNode RewriteExternalFunction(ExternalFunctionNode func)
+        {
+            List<TypeNode> rewrittenParamTypes = new();
+            foreach (TypeNode type in func.ParamTypes)
+                rewrittenParamTypes.Add(RewriteType(type));
+            
+            ExternalFunctionNode rewritten = func with { ParamTypes = rewrittenParamTypes };
+            if (rewritten.ReturnType != null)
+                rewritten = rewritten with { ReturnType = RewriteType(rewritten.ReturnType) };
+
             return rewritten;
         }
 
@@ -72,7 +114,7 @@ namespace Mint.Semantics
 
         private StmtNode RewriteStatement(StmtNode stmt) => stmt switch
         {
-            VarDeclNode vd => vd with { Initializer = RewriteExpression(vd.Initializer) },
+            VarDeclNode vd => vd with { Initializer = RewriteExpression(vd.Initializer), Type = RewriteType(vd.Type) },
             AssignNode a => a with { Target = RewriteExpression(a.Target), Value = RewriteExpression(a.Value) },
             IfNode i => RewriteIf(i),
             WhileNode w => w with { Condition = RewriteExpression(w.Condition), Body = RewriteBlock(w.Body) },
@@ -108,8 +150,7 @@ namespace Mint.Semantics
 
         private ExprNode RewriteExpression(ExprNode expr) => expr switch
         {
-            IdentifierNode id when IsKnownObject(id.Name)
-                => new PushInstanceNode(id.Name, id.Line, id.Column),
+            IdentifierNode id => RewriteIdentifier(id),
             QualifiedAccessNode qa => RewriteQualifiedAccess(qa),
             MemberAccessNode ma => ma with { Object = RewriteExpression(ma.Object) },
             ArrayAccessNode aa => aa with
@@ -131,6 +172,22 @@ namespace Mint.Semantics
             _ => expr
         };
 
+        private ExprNode RewriteIdentifier(IdentifierNode id)
+        {
+            if (IsNeighborObject(id.Name))
+                return new PushInstanceNode($"{NameOperations.GetParent(_moduleSymbols.Name)}.{id.Name}", id.Line, id.Column);
+            if (IsKnownObject(id.Name))
+                return new PushInstanceNode(id.Name, id.Line, id.Column);
+            if (_currentObj != null && _currentObj.Variables.ContainsKey(id.Name))
+                return new QualifiedAccessNode(GetLocalQualifiedName(id.Name), id.Line, id.Column);
+            return id;
+        }
+
+        /*
+        The 2 following functions are incomprehensible horrors, they work but I have no idea how.
+        TODO if you have the sanity : clean up
+        */
+
         private ExprNode RewriteQualifiedAccess(QualifiedAccessNode qa)
         {
             if (IsKnownObject(qa.FullName))
@@ -138,12 +195,18 @@ namespace Mint.Semantics
 
             string[] names = qa.FullName.Split('.');
 
+            if (IsNeighborObject(names[0]))
+                return BuildMemberAccess(
+                    new QualifiedAccessNode($"{NameOperations.GetParent(_moduleSymbols.Name)}.{names[0]}", qa.Line, qa.Column),
+                    names[1..]
+                );
+
             if (IsLocalVariable(names[0]))
                 return BuildMemberAccess(new IdentifierNode(names[0], qa.Line, qa.Column), names);
 
             // Variable from the current class, written as a short-hand
             if (_currentObj != null && _currentObj.Variables.ContainsKey(names[0]))
-                return BuildMemberAccess(new QualifiedAccessNode(GetQualifiedName(names[0]), qa.Line, qa.Column), names);
+                return BuildMemberAccess(new QualifiedAccessNode(GetLocalQualifiedName(names[0]), qa.Line, qa.Column), names);
 
             // Static access
             int qaIndex = FindQualifiedIndex(names);
@@ -154,7 +217,7 @@ namespace Mint.Semantics
             QualifiedAccessNode starterQualified = new QualifiedAccessNode(joinedQualif, qa.Line, qa.Column);
             if (IsLocalClassQualified(qaIndex, names[0]))
                 starterQualified = new QualifiedAccessNode(
-                    $"{_moduleSymbols.Namespace}.{joinedQualif}",
+                    $"{NameOperations.GetParent(_moduleSymbols.Name)}.{joinedQualif}",
                     qa.Line,
                     qa.Column
                 );
@@ -177,11 +240,11 @@ namespace Mint.Semantics
 
             int qcIndex = FindQualifiedIndex(names);
             if (qcIndex == -1)
-                return qc with { FullName = GetQualifiedName(qc.FullName), Args = rewrittenArgs };
+                return qc with { FullName = GetLocalQualifiedName(qc.FullName), Args = rewrittenArgs };
 
             string joinedQualif = string.Join('.', names[..(qcIndex + 1)]);
             if (IsLocalClassQualified(qcIndex, names[0]))
-                joinedQualif = $"{_moduleSymbols.Namespace}.{joinedQualif}";
+                joinedQualif = $"{NameOperations.GetParent(_moduleSymbols.Name)}.{joinedQualif}";
 
             if (qcIndex == names.Length - 1)
                 return qc with { FullName = joinedQualif };
@@ -232,19 +295,34 @@ namespace Mint.Semantics
             return index;
         }
 
-        private string GetQualifiedName(string member) => $"{_currentObj?.FullName}.{member}";
+        private string GetLocalQualifiedName(string member) => $"{_currentObj?.FullName}.{member}";
 
         // fuck my stupid chungus life
         private bool IsKnownObject(string fullName) =>
-            _moduleSymbols.Objects.ContainsKey(fullName) ||
-            _moduleSymbols.XRefs.ContainsKey(fullName) || (
-                string.Join('.', fullName.Split('.')[..^1]) == _moduleSymbols.Namespace &&
-                _moduleSymbols.Objects.ContainsKey(fullName.Split('.')[^1]));
+            _moduleSymbols.LocalObjects.ContainsKey(fullName) ||
+            _moduleSymbols.XRefObjects.ContainsKey(fullName) || (
+                string.Join('.', fullName.Split('.')[..^1]) == NameOperations.GetParent(_moduleSymbols.Name) &&
+                _moduleSymbols.LocalObjects.ContainsKey(fullName.Split('.')[^1]));
 
         private bool IsLocalVariable(string name) => _scope.LookUp(name) != null;
 
         private bool IsLocalClassQualified(int qualIndex, string firstName)
-            => qualIndex == 1 && _moduleSymbols.Objects.ContainsKey(firstName);
+            => qualIndex == 1 && _moduleSymbols.LocalObjects.ContainsKey(firstName);
+
+        private bool IsNeighborObject(string name)
+        {
+            if (_currentObj != null)
+                return _moduleSymbols.LocalObjects.ContainsKey(name);
+
+            if (_currentXRef != null)
+            {
+                string[] names = _currentXRef.FullName.Split('.');
+                string xrefNamespace = string.Join('.', names[..^1]);
+                return _moduleSymbols.XRefObjects.ContainsKey($"{xrefNamespace}.{name}");
+            }
+
+            return false;
+        }
 
         private static ExprNode BuildMemberAccess(ExprNode starter, string[] chain)
         {

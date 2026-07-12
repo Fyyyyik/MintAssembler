@@ -1,4 +1,5 @@
 ﻿using Mint.AstNodes;
+using Mint.Util;
 
 namespace Mint.Semantics
 {
@@ -14,88 +15,95 @@ namespace Mint.Semantics
 
         public SemanticAnalyser(VersionRules rules) => _rules = rules;
 
-        public SemanticResult Analyse(ModuleNode module, string @namespace, out ModuleNode rewrittenModule)
+        public SemanticResult Analyse(ModuleNode module, out ModuleNode rewrittenModule)
         {
-            _module = new() { Namespace = @namespace };
-
-            // Pass 1
+            // Pass 1 - Initial symbol table for rewriter
             BuildSymbolTable(module);
 
             // Pass 2
             rewrittenModule = new Rewriter(_module).Rewrite(module);
 
-            // Pass 3 - type checking
+            // Pass 3 - New symbol table with new information from rewriter
+            BuildSymbolTable(rewrittenModule);
+
+            // Pass 4 - type checking
             foreach (ObjectNode obj in rewrittenModule.Objects)
-                AnalyseObject(obj);
+                if (obj.Location == ObjectLocation.Local)
+                    AnalyseObject(obj);
 
             return new SemanticResult(_module, _exprTypes, _errors);
         }
 
         private void BuildSymbolTable(ModuleNode module)
         {
+            _module = new() { Name = module.FullName };
             foreach (ObjectNode obj in module.Objects)
             {
-                ObjectSymbol objSymbol = new ObjectSymbol
+                if (obj.Location == ObjectLocation.Local)
                 {
-                    FullName = GetFullObjectName(obj.Name)
-                };
-
-                foreach (MemberNode member in obj.Members)
-                    switch (member)
+                    ObjectSymbol objSbl = new()
                     {
-                        case VariableNode variable:
-                            objSymbol.Variables[variable.Name] = new VariableSymbol
-                            {
-                                Name = variable.Name,
-                                Type = variable.Type
-                            };
-                            break;
-                        case FunctionNode function:
-                            objSymbol.Functions[function.Name] = new FunctionSymbol
-                            {
-                                Name = function.Name,
-                                ReturnType = function.ReturnType,
-                                HasThis = function.HasThis
-                            };
-                            break;
-                    }
-                _module.Objects[obj.Name] = objSymbol;
-            }
+                        FullName = GetFullObjectName(obj.Name)
+                    };
 
-            foreach (ObjectNode xRef in module.XRefs)
-            {
-                XRefSymbol xRefSymbol = new XRefSymbol
+                    foreach (MemberNode member in obj.Members)
+                        switch (member)
+                        {
+                            case VariableNode varNode:
+                                objSbl.Variables.Add(varNode.Name, new VariableSymbol()
+                                {
+                                    Name = varNode.Name,
+                                    Type = varNode.Type
+                                });
+                                break;
+                            case FunctionNode funcNode:
+                                FunctionSymbol funcSbl = new()
+                                {
+                                    Name = funcNode.Name,
+                                    ReturnType = funcNode.ReturnType,
+                                    HasThis = funcNode.HasThis
+                                };
+                                funcSbl.Parameters.AddRange(funcNode.Params);
+                                objSbl.Functions.Add(funcNode.Name, funcSbl);
+                                break;
+                        }
+                    _module.LocalObjects.Add(obj.Name, objSbl);
+                }
+                else
                 {
-                    FullName = xRef.Name
-                };
-
-                foreach (MemberNode member in xRef.Members)
-                    switch (member)
+                    XRefSymbol xrefSbl = new()
                     {
-                        case VariableNode varNode:
-                            xRefSymbol.Variables.Add(
-                                varNode.Name,
-                                new VariableSymbol() { Name = varNode.Name, Type = varNode.Type}
-                            );
-                            break;
-                        case ExternalFunctionNode xFuncNode:
-                            ExternalFunctionSymbol xFuncSbl = new()
-                            {
-                                Name = xFuncNode.Name,
-                                ReturnType = xFuncNode.ReturnType
-                            };
-                            foreach (TypeNode paramType in xFuncNode.ParamTypes)
-                                xFuncSbl.ArgumentTypes.Add(paramType);
-                            xRefSymbol.Functions.Add(xFuncNode.Name, xFuncSbl);
-                            break;
-                    }
-                _module.XRefs[xRef.Name] = xRefSymbol;
+                        FullName = obj.Name
+                    };
+
+                    foreach (MemberNode member in obj.Members)
+                        switch (member)
+                        {
+                            case VariableNode varNode:
+                                xrefSbl.Variables.Add(varNode.Name, new VariableSymbol()
+                                {
+                                    Name = varNode.Name,
+                                    Type = varNode.Type
+                                });
+                                break;
+                            case ExternalFunctionNode xrefFuncNode:
+                                XRefFunctionSymbol xrefFuncSbl = new()
+                                {
+                                    Name = xrefFuncNode.Name,
+                                    ReturnType = xrefFuncNode.ReturnType
+                                };
+                                xrefFuncSbl.ArgumentTypes.AddRange(xrefFuncNode.ParamTypes);
+                                xrefSbl.Functions.Add(xrefFuncNode.Name, xrefFuncSbl);
+                                break;
+                        }
+                    _module.XRefObjects.Add(obj.Name, xrefSbl);
+                }
             }
         }
 
         private void AnalyseObject(ObjectNode obj)
         {
-            _currentClass = _module.Objects[obj.Name];
+            _currentClass = _module.LocalObjects[obj.Name];
 
             // TODO : add check for base class
 
@@ -223,10 +231,10 @@ namespace Mint.Semantics
         {
             TypeNode? type = expr switch
             {
-                IntLiteralNode _ => new TypeNode("int", expr.Line, expr.Column),
-                FloatLiteralNode _ => new TypeNode("float", expr.Line, expr.Column),
-                BoolLiteralNode _ => new TypeNode("bool", expr.Line, expr.Column),
-                StringLiteralNode _ => new TypeNode("string", expr.Line, expr.Column),
+                IntLiteralNode _ => new TypeNode("int", true, false, expr.Line, expr.Column),
+                FloatLiteralNode _ => new TypeNode("float", true, false, expr.Line, expr.Column),
+                BoolLiteralNode _ => new TypeNode("bool", true, false, expr.Line, expr.Column),
+                StringLiteralNode _ => new TypeNode("string", true, false, expr.Line, expr.Column),
 
                 IdentifierNode id => ResolveIdentifierType(id),
                 QualifiedAccessNode qa => ResolveQualifiedAccessType(qa),
@@ -268,7 +276,7 @@ namespace Mint.Semantics
             string varName = names[^1];
 
             // Check in objects
-            if (_module.Objects.TryGetValue(names[^2], out ObjectSymbol? locObj))
+            if (_module.LocalObjects.TryGetValue(names[^2], out ObjectSymbol? locObj))
                 if (locObj.Variables.TryGetValue(varName, out VariableSymbol? locVar))
                 {
                     _exprTypes[qualifiedAccess] = locVar.Type;
@@ -276,7 +284,7 @@ namespace Mint.Semantics
                 }
 
             // Check in xrefs
-            if (_module.XRefs.TryGetValue(leadup, out XRefSymbol? xrefObj))
+            if (_module.XRefObjects.TryGetValue(leadup, out XRefSymbol? xrefObj))
                 if (xrefObj.Variables.TryGetValue(varName, out VariableSymbol? xrefVar))
                 {
                     _exprTypes[qualifiedAccess] = xrefVar.Type;
@@ -301,13 +309,13 @@ namespace Mint.Semantics
             // Array length property
             if (exprType.IsArray && memberAccess.Member == "Length")
             {
-                TypeNode type = new("int", memberAccess.Line, memberAccess.Column);
+                TypeNode type = new("int", true, false, memberAccess.Line, memberAccess.Column);
                 _exprTypes[memberAccess] = type;
                 return type;
             }
 
             // Find it in the classes (or xrefs)
-            if (_module.Objects.TryGetValue(exprType.Name, out ObjectSymbol? obj))
+            if (_module.LocalObjects.TryGetValue(exprType.Name, out ObjectSymbol? obj))
             {
                 if (obj.Variables.TryGetValue(memberAccess.Member, out VariableSymbol? varSbl))
                 {
@@ -320,7 +328,7 @@ namespace Mint.Semantics
                 return null;
             }
 
-            if (_module.XRefs.TryGetValue(exprType.Name, out XRefSymbol? xrefObj))
+            if (_module.XRefObjects.TryGetValue(exprType.Name, out XRefSymbol? xrefObj))
             {
                 if (xrefObj.Variables.TryGetValue(memberAccess.Member, out VariableSymbol? xrefVar))
                 {
@@ -353,7 +361,8 @@ namespace Mint.Semantics
                 return null;
             }
 
-            TypeNode type = new(arrayType.Name, arrayAccess.Line, arrayAccess.Column, true);
+            //TypeNode type = new(arrayType.Name, ar, arrayAccess.Line, arrayAccess.Column, true);
+            TypeNode type = arrayType with { IsArray = true };
             _exprTypes[arrayAccess] = type;
             return type;
         }
@@ -367,7 +376,7 @@ namespace Mint.Semantics
                 return null;
             }
 
-            TypeNode type = new(_currentClass.FullName, ts.Line, ts.Column);
+            TypeNode type = new(_currentClass.FullName, true, false, ts.Line, ts.Column);
             _exprTypes[ts] = type;
             return type;
         }
@@ -382,7 +391,7 @@ namespace Mint.Semantics
             {
                 if (!TypesMatch(left, right))
                     AddError($"Cannot compare '{left?.Name}' and '{right?.Name}'.", binaryExpr);
-                TypeNode type = new("bool", binaryExpr.Line, binaryExpr.Column);
+                TypeNode type = new("bool", true, false, binaryExpr.Line, binaryExpr.Column);
                 _exprTypes[binaryExpr] = type;
                 return type;
             }
@@ -393,7 +402,7 @@ namespace Mint.Semantics
             {
                 if (left?.Name != "int" || right?.Name != "int")
                     AddError($"Operator '{binaryExpr.Op}' requires int operands.", binaryExpr);
-                TypeNode type = new("int", binaryExpr.Line, binaryExpr.Column);
+                TypeNode type = new("int", true, false, binaryExpr.Line, binaryExpr.Column);
                 _exprTypes[binaryExpr] = type;
                 return type;
             }
@@ -430,7 +439,7 @@ namespace Mint.Semantics
             string leadup = string.Join('.', names[..^1]);
             string funcName = names[^1];
 
-            if (_module.Objects.TryGetValue(names[^2], out ObjectSymbol? locObj))
+            if (_module.LocalObjects.TryGetValue(names[^2], out ObjectSymbol? locObj))
                 if (locObj.Functions.TryGetValue(funcName, out FunctionSymbol? objFunc))
                 {
                     CheckArguments(ToTypeNodes(objFunc.Parameters), qualifiedCall.Args, qualifiedCall, funcName);
@@ -438,8 +447,8 @@ namespace Mint.Semantics
                     return objFunc.ReturnType;
                 }
 
-            if (_module.XRefs.TryGetValue(leadup, out XRefSymbol? xrefCls))
-                if (xrefCls.Functions.TryGetValue(funcName, out ExternalFunctionSymbol? xrefFunc))
+            if (_module.XRefObjects.TryGetValue(leadup, out XRefSymbol? xrefCls))
+                if (xrefCls.Functions.TryGetValue(funcName, out XRefFunctionSymbol? xrefFunc))
                 {
                     CheckArguments(xrefFunc.ArgumentTypes, qualifiedCall.Args, qualifiedCall, funcName);
                     _exprTypes[qualifiedCall] = xrefFunc.ReturnType;
@@ -461,7 +470,7 @@ namespace Mint.Semantics
                 return null;
             }
 
-            if (_module.Objects.TryGetValue(exprType.Name.Split('.')[^1], out ObjectSymbol? obj))
+            if (_module.LocalObjects.TryGetValue(exprType.Name.Split('.')[^1], out ObjectSymbol? obj))
             {
                 if (obj.Functions.TryGetValue(memberCall.Name, out FunctionSymbol? funcSbl))
                 {
@@ -475,9 +484,9 @@ namespace Mint.Semantics
                 return null;
             }
 
-            if (_module.XRefs.TryGetValue(exprType.Name, out XRefSymbol? xrefObj))
+            if (_module.XRefObjects.TryGetValue(exprType.Name, out XRefSymbol? xrefObj))
             {
-                if (xrefObj.Functions.TryGetValue(memberCall.Name, out ExternalFunctionSymbol? xrefFunc))
+                if (xrefObj.Functions.TryGetValue(memberCall.Name, out XRefFunctionSymbol? xrefFunc))
                 {
                     CheckArguments(xrefFunc.ArgumentTypes, memberCall.Args, memberCall, memberCall.Name);
                     _exprTypes[memberCall] = xrefFunc.ReturnType;
@@ -496,21 +505,21 @@ namespace Mint.Semantics
 
         private TypeNode? ResolveNewObjectType(NewObjectNode newObject)
         {
-            TypeNode type = new(newObject.ClassName, newObject.Line, newObject.Column);
+            TypeNode type = new(newObject.ClassName, true, false, newObject.Line, newObject.Column);
             _exprTypes[newObject] = type;
             return type;
         }
 
         private TypeNode? ResolvePushInstanceType(PushInstanceNode pushInstance)
         {
-            TypeNode type = new(pushInstance.ObjectName, pushInstance.Line, pushInstance.Column);
+            TypeNode type = new(pushInstance.ObjectName, true, false, pushInstance.Line, pushInstance.Column);
             _exprTypes[pushInstance] = type;
             return type;
         }
 
         private TypeNode? ResolveArrayCreationType(ArrayCreationNode arrayCreation)
         {
-            TypeNode type = new(arrayCreation.ElementType.Name, arrayCreation.Line, arrayCreation.Column, true);
+            TypeNode type = new(arrayCreation.ElementType.Name, true, false, arrayCreation.Line, arrayCreation.Column, true);
             _exprTypes[arrayCreation] = type;
             return type;
         }
@@ -567,8 +576,8 @@ namespace Mint.Semantics
             return typeNodes.ToArray();
         }
 
-        private bool IsObject(string name) => _module.Objects.ContainsKey(name) || _module.XRefs.ContainsKey(name);
+        private bool IsObject(string name) => _module.LocalObjects.ContainsKey(name) || _module.XRefObjects.ContainsKey(name);
 
-        private string GetFullObjectName(string objName) => $"{_module.Namespace}.{objName}";
+        private string GetFullObjectName(string objName) => $"{NameOperations.GetParent(_module.Name)}.{objName}";
     }
 }
