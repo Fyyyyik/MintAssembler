@@ -289,13 +289,16 @@ namespace Mint
         {
             var (line, col) = CurrentPosition;
 
-            Expect(TokenType.OpenBrace);
             List<StmtNode> statements = new();
 
-            while (!Check(TokenType.CloseBrace) && !Check(TokenType.EOF))
-                statements.Add(ParseStatement());
+            if (Match(TokenType.OpenBrace))
+            {
+                while (!Check(TokenType.CloseBrace) && !Check(TokenType.EOF))
+                    statements.Add(ParseStatement());
+                Expect(TokenType.CloseBrace);
+            }
+            else statements.Add(ParseStatement());
 
-            Expect(TokenType.CloseBrace);
             return new BlockNode(statements, line, col);
         }
 
@@ -375,7 +378,6 @@ namespace Mint
             Expect(TokenType.CloseParen);
             BlockNode then = ParseBlock();
 
-            BlockNode? els = null;
             if (Match(TokenType.Else))
             {
                 if (Check(TokenType.If))

@@ -80,17 +80,12 @@ object TestClass
 		Mint.Debug.puts("Hello Mint!");
 
 		if (GetVec() >= 0.5)
-		{
-			int z = x * y;
-		}
+			int z = x * y; // if there's only one statement you can do this
 		else if (vec.x < 0.0)
 		{
 			int z = x / y;
 		}
-		else
-		{
-			return;
-		}
+		else return;
 
 		for (int i = 0; i < 7; i++)
 		{
