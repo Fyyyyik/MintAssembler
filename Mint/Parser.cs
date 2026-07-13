@@ -330,6 +330,10 @@ namespace Mint
 
         private bool IsVarDecl()
         {
+            // If we're starting with a const token then we're defining a const value.
+            if (Check(TokenType.Const))
+                return true;
+
             // Check for the basic 4
             if (Current.Type is TokenType.Int or TokenType.Float or TokenType.Bool or TokenType.String)
                 return true;

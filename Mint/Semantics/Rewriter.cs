@@ -13,6 +13,7 @@ namespace Mint.Semantics
     {
         private readonly ModuleSymbol _moduleSymbols;
         private readonly ScopeStack _scope = new();
+        private readonly Dictionary<string, ExprNode> _constants = new();
         private ObjectSymbol? _currentObj = null;
         private XRefSymbol? _currentXRef = null;
 

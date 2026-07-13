@@ -52,6 +52,11 @@ object TestClass
 {
 	void Exec()
 	{
+		const int VALUE = 6;
+
+		// Not allowed, will give an error when compiling
+		//VALUE = 5;
+		
 		// this is a comment
 		int x = 3; // comments like this work too
 		int y = x + (3 + 2);

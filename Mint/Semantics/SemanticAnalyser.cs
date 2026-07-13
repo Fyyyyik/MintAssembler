@@ -163,11 +163,21 @@ namespace Mint.Semantics
                         (assign.Target is IdentifierNode ident && IsObject(ident.Name)) ||
                         (assign.Target is QualifiedAccessNode qa && IsObject(qa.FullName)))
                     {
-                        AddError("Assignement is not allowed.", assign);
+                        AddError("Assignment is not allowed.", assign);
                         break;
                     }
                     TypeNode? assignType = AnalyseExpr(assign.Value);
                     TypeNode? targetType = AnalyseExpr(assign.Target);
+                    if (targetType == null)
+                    {
+                        AddError("Assignment to 'void' is not allowed.", assign);
+                        break;
+                    }
+                    if (targetType.IsConst)
+                    {
+                        AddError("Assignment to a constant value isn't allowed.", assign);
+                        break;
+                    }
                     if (!TypesMatch(assignType, targetType))
                         AddError(
                             $"Cannot assign '{assignType?.Name}' to variable of type '{targetType?.Name}'",
