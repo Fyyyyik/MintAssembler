@@ -40,6 +40,14 @@ extern object Scn.Step.Chara.ObjColl
 	void AddAttack(int, int, float, float, float);
 }
 
+namespace Mint
+{
+	extern object Debug
+	{
+		void puts(string);
+	}
+}
+
 object TestClass
 {
 	void Exec()
@@ -64,7 +72,9 @@ object TestClass
 			}
 		}
 
-		if (this.GetVec() >= 0.5)
+		Mint.Debug.puts("Hello Mint!");
+
+		if (GetVec() >= 0.5)
 		{
 			int z = x * y;
 		}
