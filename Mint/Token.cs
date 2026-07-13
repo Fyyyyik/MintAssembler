@@ -39,6 +39,17 @@ namespace Mint
         Float,
         Bool,
         String,
+        Byte,
+        UShort,
+        UInt,
+        ULong,
+        SByte,
+        Short,
+        Long,
+        Double,
+        Char,
+        WString,
+        Register,
 
         // Operators
         Plus,                // +
