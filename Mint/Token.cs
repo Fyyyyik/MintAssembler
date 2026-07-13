@@ -32,6 +32,7 @@ namespace Mint
         Const,
         Ref,
         Module,
+        Do,
 
         // Types, the basic ones (could also be Identifiers, resolve those later)
         Void,

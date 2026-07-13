@@ -316,6 +316,10 @@ namespace Mint
             if (Check(TokenType.For))
                 return ParseFor();
 
+            // do ... while
+            if (Check(TokenType.Do))
+                return ParseDoWhile();
+
             // return
             if (Check(TokenType.Return))
                 return ParseReturn();
@@ -398,7 +402,7 @@ namespace Mint
             ExprNode condition = ParseExpression();
             Expect(TokenType.CloseParen);
             BlockNode body = ParseBlock();
-            return new WhileNode(condition, body, line, col);
+            return new WhileNode(condition, body, false, line, col);
         }
 
         private ForNode ParseFor()
@@ -420,6 +424,25 @@ namespace Mint
 
             BlockNode body = ParseBlock();
             return new ForNode(initializer, condition, increment, body, line, col);
+        }
+
+        private WhileNode ParseDoWhile()
+        {
+            var (line, col) = CurrentPosition;
+
+            Expect(TokenType.Do);
+            
+            BlockNode body = ParseBlock();
+
+            Expect(TokenType.While);
+            Expect(TokenType.OpenParen);
+
+            ExprNode cond = ParseExpression();
+
+            Expect(TokenType.CloseParen);
+            Expect(TokenType.Semicolon);
+
+            return new WhileNode(cond, body, true, line, col);
         }
 
         private ReturnNode ParseReturn()

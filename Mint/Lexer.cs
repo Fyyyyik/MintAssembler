@@ -11,7 +11,7 @@ namespace Mint
 
         private static readonly Dictionary<string, TokenType> Keywords = new()
         {
-            ["object"]     = TokenType.Object,
+            ["object"]    = TokenType.Object,
             ["new"]       = TokenType.New,
             ["return"]    = TokenType.Return,
             ["if"]        = TokenType.If,
@@ -42,7 +42,8 @@ namespace Mint
             ["namespace"] = TokenType.Namespace,
             ["const"]     = TokenType.Const,
             ["ref"]       = TokenType.Ref,
-            ["module"]    = TokenType.Module
+            ["module"]    = TokenType.Module,
+            ["do"]        = TokenType.Do
         };
 
         public Lexer(string source)

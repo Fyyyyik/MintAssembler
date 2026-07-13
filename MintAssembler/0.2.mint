@@ -26,6 +26,7 @@ namespace GObj
 	mint object FootState
 	{
 		bool IsGround();
+		bool IsAir();
 	}
 
 	mint object Target
@@ -100,6 +101,9 @@ object TestClass
 		{
 			++count;
 		}
+
+		do count--;
+		while (GObj.FootState.IsAir());
 	}
 
 	float GetVec()

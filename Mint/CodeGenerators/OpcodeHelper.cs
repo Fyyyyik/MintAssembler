@@ -57,6 +57,7 @@ namespace Mint.CodeGenerators
                     { "slli32", 0x2E },
                     { "slri32", 0x2F },
                     { "jmp", 0x30 },
+                    { "jmppos", 0x31 },
                     { "jmpneg", 0x32 },
                     { "fenter", 0x33 },
                     { "fleave", 0x34 },

@@ -35,6 +35,7 @@ namespace Mint.AstNodes
     public record WhileNode(
         ExprNode Condition,
         BlockNode Body,
+        bool IsDoWhile,
         int Line,
         int Column
     ) : StmtNode(Line, Column);

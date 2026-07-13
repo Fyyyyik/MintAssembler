@@ -161,7 +161,7 @@ namespace Mint.CodeGenerators
                 VarDeclNode vd => GenerateVarDecl(vd),
                 AssignNode ass => GenerateAssign(ass),
                 IfNode ifNode => GenerateIf(ifNode),
-                WhileNode whileNode => GenerateWhile(whileNode),
+                WhileNode whileNode => whileNode.IsDoWhile ? GenerateDoWhile(whileNode) : GenerateWhile(whileNode),
                 ForNode forNode => GenerateFor(forNode),
                 ReturnNode returnNode => GenerateReturn(returnNode),
                 ExprStmtNode expr => GenerateExprStmt(expr),
@@ -305,6 +305,26 @@ namespace Mint.CodeGenerators
             short jmpnegLength = (short)(whileBody.Length / InstructionSize + 2);
             data[jmpnegInstructionPos + 2] = (byte)((jmpnegLength >> 8) & 0xFF);
             data[jmpnegInstructionPos + 3] = (byte)(jmpnegLength & 0xFF);
+
+            return data.ToArray();
+        }
+
+        protected byte[] GenerateDoWhile(WhileNode whileNode)
+        {
+            List<byte> data = new();
+
+            data.AddRange(GenerateBlock(whileNode.Body));
+
+            byte condReg = _registers.AllocateRegister();
+            data.AddRange(GenerateExpr(whileNode.Condition, condReg));
+            short endJmpLength = (short)(-data.Count / InstructionSize);
+            data.AddRange([
+                GetOpcode("jmppos"),
+                condReg,
+                (byte)((endJmpLength >> 8) & 0xFF),
+                (byte)(endJmpLength & 0xFF)
+            ]);
+            _registers.FreeRegister(condReg);
 
             return data.ToArray();
         }
