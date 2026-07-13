@@ -76,8 +76,13 @@ namespace Mint.CodeGenerators
         private MintFunction GenerateFunction(FunctionNode funcNode)
         {
             if (_currentObj == null)
-                throw new CodeGeneratorException("Cannot generate function outside of an object.", 0, 0);
-            _currentFunction = _currentObj.Functions[funcNode.Name];
+                throw new CodeGeneratorException("Cannot generate function outside of an object.", funcNode.Line, funcNode.Column);
+            if (!_currentObj.FindFunction(funcNode.Name, Utility.ToTypeNodes(funcNode.Params), out _currentFunction))
+                throw new CodeGeneratorException(
+                    $"Could not find function symbol with name '{funcNode.Name}' in the current object.",
+                    funcNode.Line,
+                    funcNode.Column
+                );
             _registers = new();
             _registers.PushNewBlock();
 
@@ -88,7 +93,7 @@ namespace Mint.CodeGenerators
                 _registers.AllocateRegister(param.Name);
 
             string retTypeName = _currentFunction.ReturnType == null ? "void" : _currentFunction.ReturnType.Name;
-            MintFunction mintFunc = new($"{retTypeName} {AppendParamTypes(funcNode.Name, SemanticAnalyser.ToTypeNodes(_currentFunction.Parameters))}")
+            MintFunction mintFunc = new($"{retTypeName} {AppendParamTypes(funcNode.Name, Utility.ToTypeNodes(_currentFunction.Parameters))}")
             {
                 Arguments = (uint)funcNode.Params.Count,
                 Data = GenerateBlock(funcNode.Body, true)
@@ -877,10 +882,10 @@ namespace Mint.CodeGenerators
         {
             string[] names = fullName.Split('.');
             if (_semantic.Module.LocalObjects.TryGetValue(names[^2], out ObjectSymbol? objSbl))
-                if (objSbl.Functions.TryGetValue(names[^1], out FunctionSymbol? objFuncSbl))
+                if (objSbl.FindFunction(names[^1], paramTypes, out FunctionSymbol? objFuncSbl))
                     return objFuncSbl;
             if (_semantic.Module.XRefObjects.TryGetValue(string.Join('.', names[..^1]), out XRefSymbol? xrefSbl))
-                if (xrefSbl.Functions.TryGetValue(names[^1], out XRefFunctionSymbol? xrefFuncSbl))
+                if (xrefSbl.FindFunction(names[^1], paramTypes, out XRefFunctionSymbol? xrefFuncSbl))
                     return xrefFuncSbl;
             return null;
         }

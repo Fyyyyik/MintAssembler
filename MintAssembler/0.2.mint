@@ -37,6 +37,7 @@ namespace GObj
 extern object Scn.Step.Chara.ObjColl
 {
 	void AddAttack(int, int, float);
+	void AddAttack(int, int, float, float, float);
 }
 
 object TestClass
@@ -79,6 +80,7 @@ object TestClass
 		for (int i = 0; i < 7; i++)
 		{
 			Scn.Step.Chara.ObjColl.AddAttack(x - 2, i, 1.0);
+			Scn.Step.Chara.ObjColl.AddAttack(1, 2, 3.0, 4.0, 5.0);
 		}
 
 		yield x + y;

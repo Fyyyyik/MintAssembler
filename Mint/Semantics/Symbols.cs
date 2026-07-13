@@ -1,4 +1,5 @@
 ﻿using Mint.AstNodes;
+using System.Diagnostics.CodeAnalysis;
 
 namespace Mint.Semantics
 {
@@ -13,7 +14,33 @@ namespace Mint.Semantics
     {
         public required string FullName;
         public Dictionary<string, VariableSymbol> Variables { get; } = new();
-        public Dictionary<string, FunctionSymbol> Functions { get; } = new();
+        public List<FunctionSymbol> Functions { get; } = new(); // overloads exists, so no dictionnary
+
+        public bool FindFunction(string name, IList<TypeNode> parameterTypes, [NotNullWhen(true)] out FunctionSymbol? funcSbl)
+        {
+            foreach (FunctionSymbol func in Functions)
+            {
+                if (func.Name == name)
+                {
+                    if (func.Parameters.Count != parameterTypes.Count)
+                        continue;
+                    bool sameParams = true;
+                    for (int i = 0; i < parameterTypes.Count; i++)
+                        if (parameterTypes[i].Name != func.Parameters[i].Type.Name)
+                        {
+                            sameParams = false;
+                            break;
+                        }
+                    if (sameParams)
+                    {
+                        funcSbl = func;
+                        return true;
+                    }
+                }
+            }
+            funcSbl = null;
+            return false;
+        }
     }
 
     // Like a class, but not from the module.
@@ -21,7 +48,33 @@ namespace Mint.Semantics
     {
         public required string FullName;
         public Dictionary<string, VariableSymbol> Variables { get; } = new();
-        public Dictionary<string, XRefFunctionSymbol> Functions { get; } = new();
+        public List<XRefFunctionSymbol> Functions { get; } = new();
+
+        public bool FindFunction(string name, IList<TypeNode> parameterTypes, [NotNullWhen(true)] out XRefFunctionSymbol? funcSbl)
+        {
+            foreach (XRefFunctionSymbol func in Functions)
+            {
+                if (func.Name == name)
+                {
+                    if (func.ArgumentTypes.Count != parameterTypes.Count)
+                        continue;
+                    bool sameTypes = true;
+                    for (int i = 0; i < parameterTypes.Count; i++)
+                        if (parameterTypes[i].Name != func.ArgumentTypes[i].Name)
+                        {
+                            sameTypes = false;
+                            break;
+                        }
+                    if (sameTypes)
+                    {
+                        funcSbl = func;
+                        return true;
+                    }
+                }
+            }
+            funcSbl = null;
+            return false;
+        }
     }
 
     // Used for local and external references since external vars don't have different info

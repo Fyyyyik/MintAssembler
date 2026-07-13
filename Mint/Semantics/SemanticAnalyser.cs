@@ -64,7 +64,7 @@ namespace Mint.Semantics
                                     HasThis = funcNode.HasThis
                                 };
                                 funcSbl.Parameters.AddRange(funcNode.Params);
-                                objSbl.Functions.Add(funcNode.Name, funcSbl);
+                                objSbl.Functions.Add(funcSbl);
                                 break;
                         }
                     _module.LocalObjects.Add(obj.Name, objSbl);
@@ -93,7 +93,7 @@ namespace Mint.Semantics
                                     ReturnType = xrefFuncNode.ReturnType
                                 };
                                 xrefFuncSbl.ArgumentTypes.AddRange(xrefFuncNode.ParamTypes);
-                                xrefSbl.Functions.Add(xrefFuncNode.Name, xrefFuncSbl);
+                                xrefSbl.Functions.Add(xrefFuncSbl);
                                 break;
                         }
                     _module.XRefObjects.Add(obj.Name, xrefSbl);
@@ -118,7 +118,7 @@ namespace Mint.Semantics
 
         private void AnalyseFunction(FunctionNode function)
         {
-            _currentFunction = _currentClass!.Functions[function.Name];
+            _currentClass!.FindFunction(function.Name, Utility.ToTypeNodes(function.Params), out _currentFunction);
             _scopeStack.PushScope();
 
             // Define every argument in the scope
@@ -439,16 +439,18 @@ namespace Mint.Semantics
             string leadup = string.Join('.', names[..^1]);
             string funcName = names[^1];
 
+            List<TypeNode> argTypes = ResolveCallArgs(qualifiedCall.Args, qualifiedCall);
+
             if (_module.LocalObjects.TryGetValue(names[^2], out ObjectSymbol? locObj))
-                if (locObj.Functions.TryGetValue(funcName, out FunctionSymbol? objFunc))
+                if (locObj.FindFunction(funcName, argTypes, out FunctionSymbol? objFunc))
                 {
-                    CheckArguments(ToTypeNodes(objFunc.Parameters), qualifiedCall.Args, qualifiedCall, funcName);
+                    CheckArguments(Utility.ToTypeNodes(objFunc.Parameters), qualifiedCall.Args, qualifiedCall, funcName);
                     _exprTypes[qualifiedCall] = objFunc.ReturnType;
                     return objFunc.ReturnType;
                 }
 
             if (_module.XRefObjects.TryGetValue(leadup, out XRefSymbol? xrefCls))
-                if (xrefCls.Functions.TryGetValue(funcName, out XRefFunctionSymbol? xrefFunc))
+                if (xrefCls.FindFunction(funcName, argTypes, out XRefFunctionSymbol? xrefFunc))
                 {
                     CheckArguments(xrefFunc.ArgumentTypes, qualifiedCall.Args, qualifiedCall, funcName);
                     _exprTypes[qualifiedCall] = xrefFunc.ReturnType;
@@ -470,11 +472,13 @@ namespace Mint.Semantics
                 return null;
             }
 
+            List<TypeNode> argTypes = ResolveCallArgs(memberCall.Args, memberCall);
+
             if (_module.LocalObjects.TryGetValue(exprType.Name.Split('.')[^1], out ObjectSymbol? obj))
             {
-                if (obj.Functions.TryGetValue(memberCall.Name, out FunctionSymbol? funcSbl))
+                if (obj.FindFunction(memberCall.Name, argTypes, out FunctionSymbol? funcSbl))
                 {
-                    CheckArguments(ToTypeNodes(funcSbl.Parameters), memberCall.Args, memberCall, memberCall.Name);
+                    CheckArguments(Utility.ToTypeNodes(funcSbl.Parameters), memberCall.Args, memberCall, memberCall.Name);
                     _exprTypes[memberCall] = funcSbl.ReturnType;
                     return funcSbl.ReturnType;
                 }
@@ -486,7 +490,7 @@ namespace Mint.Semantics
 
             if (_module.XRefObjects.TryGetValue(exprType.Name, out XRefSymbol? xrefObj))
             {
-                if (xrefObj.Functions.TryGetValue(memberCall.Name, out XRefFunctionSymbol? xrefFunc))
+                if (xrefObj.FindFunction(memberCall.Name, argTypes, out XRefFunctionSymbol? xrefFunc))
                 {
                     CheckArguments(xrefFunc.ArgumentTypes, memberCall.Args, memberCall, memberCall.Name);
                     _exprTypes[memberCall] = xrefFunc.ReturnType;
@@ -543,6 +547,22 @@ namespace Mint.Semantics
             return null;
         }
 
+        private List<TypeNode> ResolveCallArgs(IList<ExprNode> args, AstNode context)
+        {
+            List<TypeNode> argTypes = new();
+            foreach (ExprNode arg in args)
+            {
+                TypeNode? argType = AnalyseExpr(arg);
+                if (argType == null)
+                {
+                    AddError("Argument needs to have a defined type.", context);
+                    continue;
+                }
+                argTypes.Add(argType);
+            }
+            return argTypes;
+        }
+
         private void CheckArguments(IList<TypeNode> expectedTypes, IList<ExprNode> arguments, AstNode context, string funcName)
         {
             if (expectedTypes.Count != arguments.Count)
@@ -567,14 +587,6 @@ namespace Mint.Semantics
 
         private void AddError(string message, AstNode node)
             => _errors.Add(new SemanticError(message, node));
-
-        internal static TypeNode[] ToTypeNodes(IList<ParamNode> paramNodes)
-        {
-            List<TypeNode> typeNodes = new();
-            foreach (ParamNode param in paramNodes)
-                typeNodes.Add(param.Type);
-            return typeNodes.ToArray();
-        }
 
         private bool IsObject(string name) => _module.LocalObjects.ContainsKey(name) || _module.XRefObjects.ContainsKey(name);
 
