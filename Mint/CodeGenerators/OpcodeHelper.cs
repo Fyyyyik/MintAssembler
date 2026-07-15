@@ -8,7 +8,7 @@ namespace Mint.CodeGenerators
 {
     public static class OpcodeHelper
     {
-        public static readonly Dictionary<byte[], Dictionary<string, byte>> CommonOpcodeByName = new(new ByteArrayComparer())
+        public static readonly Dictionary<byte[], Dictionary<string, byte>> OpcodeByName = new(new ByteArrayComparer())
         {
             {
                 new byte[] {0, 2, 0, 0},

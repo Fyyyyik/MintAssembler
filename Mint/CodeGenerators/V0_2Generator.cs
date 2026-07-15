@@ -15,6 +15,7 @@ namespace Mint.CodeGenerators
     // Each version of the code generator inherits from the last version.
     // 0.2 being the first mint version we know of this code generator also
     // acts as a base and defines all the basic parameters needed everywhere.
+    // Though as soon as we hit 64
     public class V0_2Generator
     {
         protected virtual int InstructionSize => 4;
@@ -96,65 +97,71 @@ namespace Mint.CodeGenerators
             MintFunction mintFunc = new($"{retTypeName} {AppendParamTypes(funcNode.Name, Utility.ToTypeNodes(_currentFunction.Parameters))}")
             {
                 Arguments = (uint)funcNode.Params.Count,
-                Data = GenerateBlock(funcNode.Body, true)
+                Data = GenerateBlock(funcNode.Body, true).Data
             };
 
             _currentFunction = null;
             return mintFunc;
         }
 
-        private byte[] GenerateBlock(BlockNode block, bool isBeginning = false)
+        private CodeWriter.CodeResult GenerateBlock(BlockNode block, bool isBeginning = false)
         {
             _registers.PushNewBlock();
-            List<byte> data = new();
+            CodeWriter writer = new();
             foreach (StmtNode stmt in block.Statements)
-                data.AddRange(GenerateStatement(stmt));
-            data.AddRange(GenerateFreeBlockResources(_registers.ExitBlock()));
+                writer.Append(GenerateStatement(stmt));
+            writer.Append(GenerateFreeBlockResources(_registers.ExitBlock()));
             if (isBeginning)
             {
-                data.InsertRange(0, GenerateFunctionEnter());
-                if (data[^4] != GetOpcode("fleave") && data[^4] != GetOpcode("fret"))
-                    data.AddRange([GetOpcode("fleave"), 0xFF, 0xFF, 0xFF]);
+                writer.Insert(0, GenerateFunctionEnter());
+                if (writer.Instructions[^1].Opcode != GetOpcode("fleave") &&
+                    writer.Instructions[^1].Opcode != GetOpcode("fret"))
+                    writer.Instructions.Add(new Instruction(GetOpcode("fleave")));
             }
-            return data.ToArray();
+            return writer.Result;
         }
 
-        protected byte[] GenerateFunctionEnter()
+        protected CodeWriter.CodeResult GenerateFunctionEnter()
         {
             if (_currentFunction == null)
                 throw new CodeGeneratorException( // This is mainly to shut up C#, this shouldn't ever happen
                     "Tried to generate a function entrance outside of a function.",
                     0, 0
                 );
+
             byte argCount = (byte)_currentFunction.Parameters.Count;
             if (_currentFunction.ReturnType != null) argCount++;
             if (_currentFunction.HasThis) argCount++;
-            return [GetOpcode("fenter"), (byte)_registers.RegisterCount, argCount, 0xFF];
+
+            CodeWriter writer = new();
+            writer.Instructions.Add(new Instruction(GetOpcode("fenter"), _registers.RegisterCount, argCount));
+            return writer.Result;
         }
 
-        protected byte[] GenerateFreeBlockResources(HashSet<byte> freedRegisters)
+        protected CodeWriter.CodeResult GenerateFreeBlockResources(HashSet<byte> freedRegisters)
         {
-            List<byte> data = new();
+            CodeWriter writer = new();
 
             foreach (byte reg in freedRegisters)
             {
                 if (_arrayRegs.Contains(reg))
                 {
-                    data.AddRange([GetOpcode("arpop"), reg, 0xFF, 0xFF]);
+                    writer.Instructions.Add(new Instruction(GetOpcode("arpop"), reg));
                     _arrayRegs.Remove(reg);
                 }
                 if (_instanceRegs.TryGetValue(reg, out string? obj))
                 {
                     ushort v = (ushort)AddOrGetXRef(obj);
-                    data.AddRange([GetOpcode("sppop"), reg, (byte)((v >> 8) & 0xFF), (byte)(v & 0xFF)]);
+                    (byte, byte) vBytes = CodeWriter.ToBytes(v);
+                    writer.Instructions.Add(new Instruction(GetOpcode("sppop"), reg, vBytes.Item1, vBytes.Item2));
                     _instanceRegs.Remove(reg);
                 }
             }
 
-            return data.ToArray();
+            return writer.Result;
         }
 
-        private byte[] GenerateStatement(StmtNode statement)
+        private CodeWriter.CodeResult GenerateStatement(StmtNode statement)
         {
             return statement switch
             {
@@ -171,14 +178,14 @@ namespace Mint.CodeGenerators
             };
         }
 
-        protected byte[] GenerateVarDecl(VarDeclNode varDecl)
+        protected CodeWriter.CodeResult GenerateVarDecl(VarDeclNode varDecl)
         {
             byte destReg = _registers.AllocateRegister(varDecl.Name);
             return GenerateExpr(varDecl.Initializer, destReg);
         }
 
         // TODO : override in 7.X (no more mint array)
-        protected byte[] GenerateAssign(AssignNode assign)
+        protected CodeWriter.CodeResult GenerateAssign(AssignNode assign)
         {
             // Every kind of assign is separated for easy overrides in specific cases
             return assign.Target switch
@@ -192,213 +199,230 @@ namespace Mint.CodeGenerators
             };
         }
 
-        protected byte[] GenerateArrayAssign(AssignNode assign, ArrayAccessNode targetArray)
+        protected CodeWriter.CodeResult GenerateArrayAssign(AssignNode assign, ArrayAccessNode targetArray)
         {
-            List<byte> data = new();
+            CodeWriter writer = new();
             byte arrReg = _registers.AllocateRegister(),
                  cpyReg = _registers.AllocateRegister(),
                  idxReg = _registers.AllocateRegister(),
                  valReg = _registers.AllocateRegister();
-            data.AddRange(GenerateExpr(targetArray.Array, arrReg));
-            data.AddRange(GenerateExpr(targetArray.Index, idxReg));
-            data.AddRange(GenerateExpr(assign.Value, valReg));
-            data.AddRange([GetOpcode("ldsrsr"), cpyReg, arrReg, 0xFF]);
-            data.AddRange([GetOpcode("arirx"), cpyReg, idxReg, 0xFF]);
-            data.AddRange([GetOpcode("stsrsr"), cpyReg, valReg, 0xFF]);
+
+            writer.Append(GenerateExpr(targetArray.Array, arrReg));
+            writer.Append(GenerateExpr(targetArray.Index, idxReg));
+            writer.Append(GenerateExpr(assign.Value, valReg));
+
+            writer.Instructions.Add(new Instruction(GetOpcode("ldsrsr"), cpyReg, arrReg));
+            writer.Instructions.Add(new Instruction(GetOpcode("arirx"), cpyReg, idxReg));
+            writer.Instructions.Add(new Instruction(GetOpcode("stsrsr"), cpyReg, valReg));
+
             if (targetArray.Array is ArrayCreationNode)
-                data.AddRange([GetOpcode("arpop"), arrReg, 0xFF, 0xFF]);
+                writer.Instructions.Add(new Instruction(GetOpcode("arpop"), arrReg));
+
             _registers.FreeRegister(arrReg);
             _registers.FreeRegister(cpyReg);
             _registers.FreeRegister(idxReg);
             _registers.FreeRegister(valReg);
-            return data.ToArray();
+
+            return writer.Result;
         }
 
-        protected byte[] GenerateMemberAssign(AssignNode assign, MemberAccessNode targetMember)
+        protected CodeWriter.CodeResult GenerateMemberAssign(AssignNode assign, MemberAccessNode targetMember)
         {
-            List<byte> data = new();
+            CodeWriter writer = new();
 
             byte objReg = _registers.AllocateRegister();
-            data.AddRange(GenerateExpr(targetMember.Object, objReg));
+            writer.Append(GenerateExpr(targetMember.Object, objReg));
+
             byte valReg = _registers.AllocateRegister();
-            data.AddRange(GenerateExpr(assign.Value, valReg));
+            writer.Append(GenerateExpr(assign.Value, valReg));
 
             string xref = $"{_semantic.ExprTypes[targetMember.Object]?.Name}.{targetMember.Member}";
             ushort v = (ushort)AddOrGetXRef(xref);
-            data.AddRange([GetOpcode("addofs"), objReg, (byte)((v >> 8) & 0xFF), (byte)(v & 0xFF)]);
-            data.AddRange([GetOpcode("stsrsr"), objReg, valReg, 0xFF]);
+            (byte, byte) vBytes = CodeWriter.ToBytes(v);
+            writer.Instructions.Add(new Instruction(GetOpcode("addofs"), objReg, vBytes.Item1, vBytes.Item2));
+            writer.Instructions.Add(new Instruction(GetOpcode("stsrsr"), objReg, valReg));
 
             _registers.FreeRegister(objReg);
             _registers.FreeRegister(valReg);
-            return data.ToArray();
+            return writer.Result;
         }
 
-        protected byte[] GenerateQualifiedAssign(AssignNode assign, QualifiedAccessNode targetQualified)
+        protected CodeWriter.CodeResult GenerateQualifiedAssign(AssignNode assign, QualifiedAccessNode targetQualified)
         {
-            List<byte> data = new();
+            CodeWriter writer = new();
 
             byte valReg = _registers.AllocateRegister();
-            data.AddRange(GenerateExpr(assign.Value, valReg));
+            writer.Append(GenerateExpr(assign.Value, valReg));
 
             ushort v = (ushort)AddOrGetXRef(targetQualified.FullName);
-            data.AddRange([GetOpcode("stsvsr"), valReg, (byte)((v >> 8) & 0xFF), (byte)(v & 0xFF)]);
+            (byte, byte) vBytes = CodeWriter.ToBytes(v);
+            writer.Instructions.Add(new Instruction(GetOpcode("stsvsr"), valReg, vBytes.Item1, vBytes.Item2));
 
             _registers.FreeRegister(valReg);
-            return data.ToArray();
+            return writer.Result;
         }
 
-        protected byte[] GenerateIf(IfNode ifNode)
+        protected CodeWriter.CodeResult GenerateIf(IfNode ifNode)
         {
-            List<byte> data = new();
+            CodeWriter writer = new();
+
             byte condReg = _registers.AllocateRegister();
-            data.AddRange(GenerateExpr(ifNode.Condition, condReg));
-            int jumpInstructionIndex = data.Count;
-            data.AddRange([GetOpcode("jmpneg"), condReg, 0x00, 0x00]); // temporary v
-            byte[] thenBlock = GenerateBlock(ifNode.Then);
-            data.AddRange(thenBlock);
-            short jumpLength = (short)(thenBlock.Length / InstructionSize + 1);
+            writer.Append(GenerateExpr(ifNode.Condition, condReg));
+
+            int jmpnegInstrIndex = writer.Instructions.Count;
+            Instruction jmpnegInstr = new Instruction(GetOpcode("jmpneg"), condReg); // temporary until v is figured out
+            writer.Instructions.Add(jmpnegInstr);
+
+            _registers.FreeRegister(condReg);
+
+            CodeWriter.CodeResult thenBlock = GenerateBlock(ifNode.Then);
+            writer.Append(thenBlock);
+            short jumpLength = (short)(thenBlock.Instructions.Length + 1);
 
             if (ifNode.ElseIf != null || ifNode.Else != null)
             {
                 jumpLength++; // skip the additional jump that jumps over all the elses
-                int elseJumpInstructionIndex = data.Count;
-                data.AddRange([GetOpcode("jmp"), 0xFF, 0x00, 0x00]); // temporary v, again
 
-                byte[] els = [];
+                int elseJumpInstructionIndex = writer.Instructions.Count;
+                Instruction elseJmpInstr = new Instruction(GetOpcode("jmp")); // temporary v, again
+                writer.Instructions.Add(elseJmpInstr);
+
+                CodeWriter.CodeResult els;
                 if (ifNode.ElseIf != null)
                     els = GenerateIf(ifNode.ElseIf);
                 else if (ifNode.Else != null)
                     els = GenerateBlock(ifNode.Else);
-                data.AddRange(els);
-                short elsJumpLength = (short)(els.Length / InstructionSize + 1);
-                data[elseJumpInstructionIndex + 2] = (byte)((elsJumpLength >> 8) & 0xFF);
-                data[elseJumpInstructionIndex + 3] = (byte)(elsJumpLength & 0xFF);
+                else
+                    // what
+                    throw new CodeGeneratorException("What the fuck. How did you get here.", ifNode.Line, ifNode.Column);
+                writer.Append(els);
+
+                short elsJumpLength = (short)(els.Instructions.Length + 1);
+                (byte, byte) elsJmpVBytes = CodeWriter.ToBytes(elsJumpLength);
+                writer.Instructions[elseJumpInstructionIndex] = elseJmpInstr with { X = elsJmpVBytes.Item1, Y = elsJmpVBytes.Item2 };
             }
 
-            data[jumpInstructionIndex + 2] = (byte)((jumpLength >> 8) & 0xFF);
-            data[jumpInstructionIndex + 3] = (byte)(jumpLength & 0xFF);
-            
-            return data.ToArray();
+            (byte, byte) vBytes = CodeWriter.ToBytes(jumpLength);
+            writer.Instructions[jmpnegInstrIndex] = jmpnegInstr with { X = vBytes.Item1, Y = vBytes.Item2 };
+
+            return writer.Result;
         }
 
-        protected byte[] GenerateWhile(WhileNode whileNode)
+        protected CodeWriter.CodeResult GenerateWhile(WhileNode whileNode)
         {
-            List<byte> data = new();
+            CodeWriter writer = new();
 
             byte condReg = _registers.AllocateRegister();
-            data.AddRange(GenerateExpr(whileNode.Condition, condReg));
-            int jmpnegInstructionPos = data.Count;
-            data.AddRange([GetOpcode("jmpneg"), condReg, 0x00, 0x00]);
+            writer.Append(GenerateExpr(whileNode.Condition, condReg));
+
+            int jmpnegInstructionPos = writer.Instructions.Count;
+            Instruction jmpnegInstr = new(GetOpcode("jmpneg"), condReg);
+            writer.Instructions.Add(jmpnegInstr);
             _registers.FreeRegister(condReg);
 
-            byte[] whileBody = GenerateBlock(whileNode.Body);
-            data.AddRange(whileBody);
+            CodeWriter.CodeResult whileBody = GenerateBlock(whileNode.Body);
+            writer.Append(whileBody);
 
-            short endJmpLength = (short)(-data.Count / InstructionSize);
-            data.AddRange([
-                GetOpcode("jmp"),
-                0xFF,
-                (byte)((endJmpLength >> 8) & 0xFF),
-                (byte)(endJmpLength & 0xFF)
-            ]);
+            short endJmpLength = (short)(-writer.Instructions.Count);
+            (byte, byte) vBytes = CodeWriter.ToBytes(endJmpLength);
+            writer.Instructions.Add(new Instruction(GetOpcode("jmp"), 0xFF, vBytes.Item1, vBytes.Item2));
 
-            short jmpnegLength = (short)(whileBody.Length / InstructionSize + 2);
-            data[jmpnegInstructionPos + 2] = (byte)((jmpnegLength >> 8) & 0xFF);
-            data[jmpnegInstructionPos + 3] = (byte)(jmpnegLength & 0xFF);
+            short jmpnegLength = (short)(whileBody.Instructions.Length + 2);
+            vBytes = CodeWriter.ToBytes(jmpnegLength);
+            writer.Instructions[jmpnegInstructionPos] = jmpnegInstr with { X = vBytes.Item1, Y = vBytes.Item2 };
 
-            return data.ToArray();
+            return writer.Result;
         }
 
-        protected byte[] GenerateDoWhile(WhileNode whileNode)
+        protected CodeWriter.CodeResult GenerateDoWhile(WhileNode whileNode)
         {
-            List<byte> data = new();
+            CodeWriter writer = new();
 
-            data.AddRange(GenerateBlock(whileNode.Body));
+            writer.Append(GenerateBlock(whileNode.Body));
 
             byte condReg = _registers.AllocateRegister();
-            data.AddRange(GenerateExpr(whileNode.Condition, condReg));
-            short endJmpLength = (short)(-data.Count / InstructionSize);
-            data.AddRange([
-                GetOpcode("jmppos"),
-                condReg,
-                (byte)((endJmpLength >> 8) & 0xFF),
-                (byte)(endJmpLength & 0xFF)
-            ]);
+            writer.Append(GenerateExpr(whileNode.Condition, condReg));
+            short endJmpLength = (short)(-writer.Instructions.Count);
+            (byte, byte) vBytes = CodeWriter.ToBytes(endJmpLength);
+            writer.Instructions.Add(new Instruction(GetOpcode("jmppos"), condReg, vBytes.Item1, vBytes.Item2));
             _registers.FreeRegister(condReg);
 
-            return data.ToArray();
+            return writer.Result;
         }
 
-        protected byte[] GenerateFor(ForNode forNode)
+        protected CodeWriter.CodeResult GenerateFor(ForNode forNode)
         {
-            List<byte> data = new();
+            CodeWriter writer = new();
 
-            data.AddRange(GenerateStatement(forNode.Initializer));
+            writer.Append(GenerateStatement(forNode.Initializer));
 
-            int condPos = data.Count;
+            int condPos = writer.Instructions.Count;
             byte condReg = _registers.AllocateRegister();
-            data.AddRange(GenerateExpr(forNode.Condition, condReg));
+            writer.Append(GenerateExpr(forNode.Condition, condReg));
 
-            int condJmpPos = data.Count;
-            data.AddRange([GetOpcode("jmpneg"), condReg, 0x00, 0x00]); // temporary v
+            int condJmpPos = writer.Instructions.Count;
+            Instruction condJmpInstr = new(GetOpcode("jmpneg"), condReg); // temporary v
+            writer.Instructions.Add(condJmpInstr);
             _registers.FreeRegister(condReg);
 
-            byte[] bodyBlock = GenerateBlock(forNode.Body);
-            data.AddRange(bodyBlock);
+            CodeWriter.CodeResult bodyBlock = GenerateBlock(forNode.Body);
+            writer.Append(bodyBlock);
 
-            byte[] incBlock = GenerateStatement(forNode.Increment);
-            data.AddRange(incBlock);
+            CodeWriter.CodeResult incBlock = GenerateStatement(forNode.Increment);
+            writer.Append(incBlock);
 
-            short bodyJmpV = (short)((condPos - data.Count) / InstructionSize);
-            data.AddRange([GetOpcode("jmp"), 0xFF, (byte)((bodyJmpV >> 8) & 0xFF), (byte)(bodyJmpV & 0xFF)]);
+            short bodyJmpV = (short)(condPos - writer.Instructions.Count);
+            (byte, byte) vBytes = CodeWriter.ToBytes(bodyJmpV);
+            writer.Instructions.Add(new Instruction(GetOpcode("jmp"), 0xFF, vBytes.Item1, vBytes.Item2));
 
-            short condJmpV = (short)((data.Count - condJmpPos) / InstructionSize);
-            data[condJmpPos + 2] = (byte)((condJmpV >> 8) & 0xFF);
-            data[condJmpPos + 3] = (byte)(condJmpV & 0xFF);
+            short condJmpV = (short)(writer.Instructions.Count - condJmpPos);
+            vBytes = CodeWriter.ToBytes(condJmpV);
+            writer.Instructions[condJmpPos] = condJmpInstr with { X = vBytes.Item1, Y = vBytes.Item2 };
 
-            return data.ToArray();
+            return writer.Result;
         }
 
-        protected byte[] GenerateReturn(ReturnNode returnNode)
+        protected CodeWriter.CodeResult GenerateReturn(ReturnNode returnNode)
         {
+            CodeWriter writer = new();
+
             if (returnNode.Value != null)
             {
-                List<byte> data = new();
-
                 byte valReg = _registers.AllocateRegister();
-                data.AddRange(GenerateExpr(returnNode.Value, valReg));
+                writer.Append(GenerateExpr(returnNode.Value, valReg));
 
-                data.AddRange([GetOpcode("ldsrsr"), 0, valReg, 0xFF]);
-                data.AddRange([GetOpcode("fret"), 0xFF, 0, 0xFF]);
+                writer.Instructions.Add(new Instruction(GetOpcode("ldsrsr"), 0, valReg));
+                writer.Instructions.Add(new Instruction(GetOpcode("fret"), 0xFF, 0, 0xFF));
 
                 _registers.FreeRegister(valReg);
-                return data.ToArray();
             }
-            else return [GetOpcode("fleave"), 0xFF, 0xFF, 0xFF];
+            else writer.Instructions.Add(new Instruction(GetOpcode("fleave")));
+            
+            return writer.Result;
         }
 
-        protected byte[] GenerateExprStmt(ExprStmtNode exprStmt)
+        protected CodeWriter.CodeResult GenerateExprStmt(ExprStmtNode exprStmt)
         {
             byte scratch = _registers.AllocateRegister();
-            byte[] data = GenerateExpr(exprStmt.Expr, scratch);
+            CodeWriter.CodeResult result = GenerateExpr(exprStmt.Expr, scratch);
             _registers.FreeRegister(scratch);
-            return data;
+            return result;
         }
 
-        protected byte[] GenerateYield(YieldNode yieldNode)
+        protected CodeWriter.CodeResult GenerateYield(YieldNode yieldNode)
         {
-            List<byte> data = new();
+            CodeWriter writer = new();
 
             byte countReg = _registers.AllocateRegister();
-            data.AddRange(GenerateExpr(yieldNode.FrameCount, countReg));
+            writer.Append(GenerateExpr(yieldNode.FrameCount, countReg));
 
-            data.AddRange([GetOpcode("yield"), countReg, 0xFF, 0xFF]);
+            writer.Instructions.Add(new Instruction(GetOpcode("yield"), countReg));
 
             _registers.FreeRegister(countReg);
-            return data.ToArray();
+            return writer.Result;
         }
 
-        protected byte[] GenerateExpr(ExprNode expr, byte destRegister) => expr switch
+        protected CodeWriter.CodeResult GenerateExpr(ExprNode expr, byte destRegister) => expr switch
         {
             IntLiteralNode intLit => GenerateIntLiteral(intLit, destRegister),
             FloatLiteralNode floatLit => GenerateFloatLiteral(floatLit, destRegister),
@@ -420,112 +444,117 @@ namespace Mint.CodeGenerators
             _ => throw new CodeGeneratorException($"Invalid expression node for this version : {expr}", expr.Line, expr.Column)
         };
 
-        protected byte[] GenerateIntLiteral(IntLiteralNode intLiteral, byte destRegister)
+        protected CodeWriter.CodeResult GenerateIntLiteral(IntLiteralNode intLiteral, byte destRegister)
         {
             ushort v = (ushort)_sdata.Count;
             _sdata.AddRange(GetBytesFromInt(intLiteral.Value));
-            return [
-                GetOpcode("ldsrc4"),
-                destRegister,
-                (byte)((v >> 8) & 0xFF),
-                (byte)(v & 0xFF)
-            ];
+
+            CodeWriter writer = new();
+            (byte, byte) vBytes = CodeWriter.ToBytes(v);
+            writer.Instructions.Add(new Instruction(GetOpcode("ldsrc4"), destRegister, vBytes.Item1, vBytes.Item2));
+
+            return writer.Result;
         }
 
-        // TODO : override in 7.0.2 to use the dedicated opcode
-        protected byte[] GenerateFloatLiteral(FloatLiteralNode floatLiteral, byte destRegister)
+        protected CodeWriter.CodeResult GenerateFloatLiteral(FloatLiteralNode floatLiteral, byte destRegister)
         {
             ushort v = (ushort)_sdata.Count;
             _sdata.AddRange(GetBytesFromInt(BitConverter.SingleToInt32Bits(floatLiteral.Value)));
-            return [
-                GetOpcode("ldsrc4"),
-                destRegister,
-                (byte)((v >> 8) & 0xFF),
-                (byte)(v & 0xFF)
-            ];
+
+            CodeWriter writer = new();
+            (byte, byte) vBytes = CodeWriter.ToBytes(v);
+            writer.Instructions.Add(new Instruction(GetOpcode("ldsrc4"), destRegister, vBytes.Item1, vBytes.Item2));
+
+            return writer.Result;
         }
 
         // TODO : override in versions starting with 7.0.2 because they removed my goat ldsrbt
-        protected byte[] GenerateBoolLiteral(BoolLiteralNode boolLiteral, byte destRegister)
+        protected CodeWriter.CodeResult GenerateBoolLiteral(BoolLiteralNode boolLiteral, byte destRegister)
         {
-            return [
-                GetOpcode(boolLiteral.Value ? "ldsrbt" : "ldsrzr"),
-                destRegister,
-                0xFF,
-                0xFF
-            ];
+            CodeWriter writer = new();
+            writer.Instructions.Add(new Instruction(GetOpcode(boolLiteral.Value ? "ldsrbt" : "ldsrzr"), destRegister));
+            return writer.Result;
         }
 
-        protected byte[] GenerateStringLiteral(StringLiteralNode stringLiteral, byte destRegister)
+        protected CodeWriter.CodeResult GenerateStringLiteral(StringLiteralNode stringLiteral, byte destRegister)
         {
             short v = (short)_sdata.Count;
             _sdata.AddRange(Encoding.UTF8.GetBytes(stringLiteral.Value + '\0'));
-            return [
-                GetOpcode("ldsrca"),
-                destRegister,
-                (byte)((v >> 8) & 0xFF),
-                (byte)(v & 0xFF)
-            ];
+
+            CodeWriter writer = new();
+            (byte, byte) vBytes = CodeWriter.ToBytes(v);
+            writer.Instructions.Add(new Instruction(GetOpcode("ldsrca"), destRegister, vBytes.Item1, vBytes.Item2));
+
+            return writer.Result;
         }
 
-        protected byte[] GenerateIdentifier(IdentifierNode identifier, byte destRegister)
+        protected CodeWriter.CodeResult GenerateIdentifier(IdentifierNode identifier, byte destRegister)
         {
             if (_registers.VarToReg.TryGetValue(identifier.Name, out byte reg))
-                return [
-                    GetOpcode("ldsrsr"),
-                    destRegister,
-                    reg,
-                    0xFF
-                ];
+            {
+                CodeWriter writer = new();
+                writer.Instructions.Add(new Instruction(GetOpcode("ldsrsr"), destRegister, reg));
+                return writer.Result;
+            }
             throw new CodeGeneratorException($"Register for identifier '{identifier.Name}' not found.", identifier.Line, identifier.Column);
         }
 
-        protected byte[] GenerateQualifiedAccess(QualifiedAccessNode qualifiedAccess, byte destRegister)
+        protected CodeWriter.CodeResult GenerateQualifiedAccess(QualifiedAccessNode qualifiedAccess, byte destRegister)
         {
             ushort v = (ushort)AddOrGetXRef(qualifiedAccess.FullName);
-            return [GetOpcode("ldsrsv"), destRegister, (byte)((v >> 8) & 0xFF), (byte)(v & 0xFF)];
+            (byte, byte) vBytes = CodeWriter.ToBytes(v);
+
+            CodeWriter writer = new();
+            writer.Instructions.Add(new Instruction(GetOpcode("ldsrsv"), destRegister, vBytes.Item1, vBytes.Item2));
+
+            return writer.Result;
         }
 
-        protected byte[] GenerateMemberAccess(MemberAccessNode memberAccess, byte destRegister)
+        protected CodeWriter.CodeResult GenerateMemberAccess(MemberAccessNode memberAccess, byte destRegister)
         {
-            List<byte> data = new();
+            CodeWriter writer = new();
 
             byte objReg = _registers.AllocateRegister();
-            data.AddRange(GenerateMemberSetup(memberAccess, objReg));
-            data.AddRange([GetOpcode("ldsra4"), destRegister, objReg, 0xFF]);
+            writer.Append(GenerateMemberSetup(memberAccess, objReg));
+            writer.Instructions.Add(new Instruction(GetOpcode("ldsra4"), destRegister, objReg));
 
             _registers.FreeRegister(objReg);
-            return data.ToArray();
+            return writer.Result;
         }
 
-        protected byte[] GenerateArrayAccess(ArrayAccessNode arrayAccess, byte destRegister)
+        protected CodeWriter.CodeResult GenerateArrayAccess(ArrayAccessNode arrayAccess, byte destRegister)
         {
-            List<byte> data = new();
+            CodeWriter writer = new();
 
             byte arrReg = _registers.AllocateRegister();
-            data.AddRange(GenerateExpr(arrayAccess.Array, arrReg));
+            writer.Append(GenerateExpr(arrayAccess.Array, arrReg));
 
             byte idxReg = _registers.AllocateRegister();
-            data.AddRange(GenerateExpr(arrayAccess.Index, idxReg));
+            writer.Append(GenerateExpr(arrayAccess.Index, idxReg));
 
             byte cpyReg = _registers.AllocateRegister();
-            data.AddRange([GetOpcode("ldsrsr"), cpyReg, arrReg, 0xFF]);
+            writer.Instructions.Add(new Instruction(GetOpcode("ldsrsr"), cpyReg, arrReg));
 
-            data.AddRange([GetOpcode("arirx"), cpyReg, idxReg, 0xFF]);
-            data.AddRange([GetOpcode("ldsra4"), destRegister, cpyReg, 0xFF]);
+            writer.Instructions.Add(new Instruction(GetOpcode("arirx"), cpyReg, idxReg));
+            writer.Instructions.Add(new Instruction(GetOpcode("ldsra4"), destRegister, cpyReg));
 
             if (arrayAccess.Array is not ArrayCreationNode)
                 _registers.FreeRegister(arrReg);
             _registers.FreeRegister(idxReg);
             _registers.FreeRegister(cpyReg);
-            return data.ToArray();
+            return writer.Result;
         }
 
-        protected byte[] GenerateThis(byte destRegister) => [GetOpcode("ldsrsr"), destRegister, 0, 0xFF];
-
-        protected byte[] GenerateBinaryExpr(BinaryExprNode binaryExpr, byte destRegister)
+        protected CodeWriter.CodeResult GenerateThis(byte destRegister)
         {
-            List<byte> data = new();
+            CodeWriter writer = new();
+            writer.Instructions.Add(new Instruction(GetOpcode("ldsrsr"), destRegister, 0));
+            return writer.Result;
+        }
+
+        protected CodeWriter.CodeResult GenerateBinaryExpr(BinaryExprNode binaryExpr, byte destRegister)
+        {
+            CodeWriter writer = new();
 
             TypeNode? binType = _semantic.ExprTypes[binaryExpr];
             TypeNode? leftType = _semantic.ExprTypes[binaryExpr.Left];
@@ -534,10 +563,10 @@ namespace Mint.CodeGenerators
                 throw new CodeGeneratorException("Cannot have a binary expression with type 'void'.", binaryExpr.Line, binaryExpr.Column);
 
             byte leftReg = _registers.AllocateRegister();
-            data.AddRange(GenerateExpr(binaryExpr.Left, leftReg));
+            writer.Append(GenerateExpr(binaryExpr.Left, leftReg));
 
             byte rightReg = _registers.AllocateRegister();
-            data.AddRange(GenerateExpr(binaryExpr.Right, rightReg));
+            writer.Append(GenerateExpr(binaryExpr.Right, rightReg));
 
             string opcode = binaryExpr.Op switch
             {
@@ -575,15 +604,20 @@ namespace Mint.CodeGenerators
                 (opcode is "ltf32" or "lef32" && binaryExpr.Op is "<" or "<="))
                 invertOperands = true;
 
-            data.AddRange([GetOpcode(opcode), destRegister, invertOperands ? rightReg : leftReg, invertOperands ? leftReg : rightReg]);
+            writer.Instructions.Add(new Instruction(
+                GetOpcode(opcode),
+                destRegister,
+                invertOperands ? rightReg : leftReg,
+                invertOperands ? leftReg : rightReg
+            ));
             _registers.FreeRegister(leftReg);
             _registers.FreeRegister(rightReg);
-            return data.ToArray();
+            return writer.Result;
         }
 
-        protected byte[] GenerateUnaryExpr(UnaryExprNode unaryExpr, byte destRegister)
+        protected CodeWriter.CodeResult GenerateUnaryExpr(UnaryExprNode unaryExpr, byte destRegister)
         {
-            List<byte> data = new();
+            CodeWriter writer = new();
 
             TypeNode? operandType = _semantic.ExprTypes[unaryExpr.Operand];
             if (operandType == null)
@@ -594,7 +628,7 @@ namespace Mint.CodeGenerators
                 );
 
             byte operandReg = _registers.AllocateRegister();
-            data.AddRange(GenerateExpr(unaryExpr.Operand, operandReg));
+            writer.Append(GenerateExpr(unaryExpr.Operand, operandReg));
 
             string opcode = unaryExpr.Op switch
             {
@@ -605,21 +639,22 @@ namespace Mint.CodeGenerators
                 _ => throw new CodeGeneratorException($"Unknown unary operation with operator '{unaryExpr.Op}'.", unaryExpr.Line, unaryExpr.Column)
             };
 
-            data.AddRange([GetOpcode(opcode), destRegister, operandReg, 0xFF]);
+            writer.Instructions.Add(new Instruction(GetOpcode(opcode), destRegister, operandReg));
+
             _registers.FreeRegister(operandReg);
-            return data.ToArray();
+            return writer.Result;
         }
 
-        protected byte[] GenerateQualifiedCall(QualifiedCallNode qualifiedCall, byte destRegister)
+        protected CodeWriter.CodeResult GenerateQualifiedCall(QualifiedCallNode qualifiedCall, byte destRegister)
         {
-            List<byte> data = new();
+            CodeWriter writer = new();
 
             List<byte> regs = new();
             List<TypeNode> argTypes = new();
             foreach (ExprNode arg in qualifiedCall.Args)
             {
                 regs.Add(_registers.AllocateRegister());
-                data.AddRange(GenerateExpr(arg, regs[^1]));
+                writer.Append(GenerateExpr(arg, regs[^1]));
 
                 TypeNode? argType = _semantic.ExprTypes[arg];
                 if (argType == null)
@@ -634,32 +669,33 @@ namespace Mint.CodeGenerators
             bool isReturn = DoesFunctionReturn(qualifiedCall.FullName, argTypes);
 
             for (int i = 0; i < regs.Count; i++)
-                data.AddRange([GetOpcode("ldfrsr"), (byte)(isReturn ? i + 1 : i), regs[i], 0xFF]);
+                writer.Instructions.Add(new Instruction(GetOpcode("ldfrsr"), (byte)(isReturn ? i + 1 : i), regs[i]));
 
             ushort v = (ushort)AddOrGetXRef(AppendParamTypes(qualifiedCall.FullName, argTypes));
-            data.AddRange([GetOpcode("call"), 0xFF, (byte)((v >> 8) & 0xFF), (byte)(v & 0xFF)]);
+            (byte, byte) vBytes = CodeWriter.ToBytes(v);
+            writer.Instructions.Add(new Instruction(GetOpcode("call"), 0xFF, vBytes.Item1, vBytes.Item2));
 
             if (isReturn)
-                data.AddRange([GetOpcode("ldsrfz"), destRegister, 0xFF, 0xFF]);
+                writer.Instructions.Add(new Instruction(GetOpcode("ldsrfz"), destRegister));
 
             foreach (byte reg in regs)
                 _registers.FreeRegister(reg);
-            return data.ToArray();
+            return writer.Result;
         }
 
-        protected byte[] GenerateMemberCall(MemberCallNode memberCall, byte destRegister)
+        protected CodeWriter.CodeResult GenerateMemberCall(MemberCallNode memberCall, byte destRegister)
         {
-            List<byte> data = new();
+            CodeWriter writer = new();
 
             byte objReg = _registers.AllocateRegister();
-            data.AddRange(GenerateExpr(memberCall.Object, objReg));
+            writer.Append(GenerateExpr(memberCall.Object, objReg));
 
             List<byte> regs = new();
             List<TypeNode> argTypes = new();
             foreach (ExprNode arg in memberCall.Args)
             {
                 regs.Add(_registers.AllocateRegister());
-                data.AddRange(GenerateExpr(arg, regs[^1]));
+                writer.Append(GenerateExpr(arg, regs[^1]));
 
                 TypeNode? argType = _semantic.ExprTypes[arg];
                 if (argType == null)
@@ -681,58 +717,68 @@ namespace Mint.CodeGenerators
             string fullName = $"{objType.Name}.{memberCall.Name}";
             bool isReturn = DoesFunctionReturn(fullName, argTypes);
 
-            data.AddRange([
+            writer.Instructions.Add(new Instruction(
                 GetOpcode("ldfrsr"),
                 (byte)(isReturn ? 1 : 0),
-                (byte)(_currentFunction != null && _currentFunction.ReturnType != null ? 1 : 0),
-                0xFF
-            ]);
+                objReg
+            ));
             for (int i = 0; i < regs.Count; i++)
-                data.AddRange([GetOpcode("ldfrsr"), (byte)(isReturn ? i + 2 : i + 1), regs[i], 0xFF]);
+                writer.Instructions.Add(new Instruction(
+                    GetOpcode("ldfrsr"),
+                    (byte)(isReturn ? i + 2 : i + 1),
+                    regs[i]
+                ));
 
             ushort v = (ushort)AddOrGetXRef(AppendParamTypes(fullName, argTypes));
-            data.AddRange([GetOpcode("call"), 0xFF, (byte)((v >> 8) & 0xFF), (byte)(v & 0xFF)]);
+            (byte, byte) vBytes = CodeWriter.ToBytes(v);
+            writer.Instructions.Add(new Instruction(GetOpcode("call"), 0xFF, vBytes.Item1, vBytes.Item2));
 
             if (isReturn)
-                data.AddRange([GetOpcode("ldsrfz"), destRegister, 0xFF, 0xFF]);
+                writer.Instructions.Add(new Instruction(GetOpcode("ldsrfz"), destRegister));
 
+            _registers.FreeRegister(objReg);
             foreach (byte reg in regs)
                 _registers.FreeRegister(reg);
-            return data.ToArray();
+            return writer.Result;
         }
 
-        protected byte[] GeneratePushInstance(PushInstanceNode pushInstance, byte destRegister)
+        protected CodeWriter.CodeResult GeneratePushInstance(PushInstanceNode pushInstance, byte destRegister)
         {
             ushort v = (ushort)AddOrGetXRef(pushInstance.ObjectName);
+            (byte, byte) vBytes = CodeWriter.ToBytes(v);
+
+            CodeWriter writer = new();
+            writer.Instructions.Add(new Instruction(GetOpcode("sppshz"), destRegister, vBytes.Item1, vBytes.Item2));
+
             _instanceRegs.Add(destRegister, pushInstance.ObjectName);
-            return [GetOpcode("sppshz"), destRegister, (byte)((v >> 8) & 0xFF), (byte)(v & 0xFF)];
+            return writer.Result;
         }
 
-        protected byte[] GenerateArrayCreation(ArrayCreationNode arrayCreation, byte destRegister)
+        protected CodeWriter.CodeResult GenerateArrayCreation(ArrayCreationNode arrayCreation, byte destRegister)
         {
-            List<byte> data = new();
+            CodeWriter writer = new();
 
             if (arrayCreation.Size != null)
-                data.AddRange(GenerateExpr(arrayCreation.Size, destRegister));
+                writer.Append(GenerateExpr(arrayCreation.Size, destRegister));
             else if (arrayCreation.Initializers != null)
-                data.AddRange(GenerateIntLiteral(new IntLiteralNode(
+                writer.Append(GenerateIntLiteral(new IntLiteralNode(
                     arrayCreation.Initializers.Count,
                     arrayCreation.Line,
                     arrayCreation.Column
                 ), destRegister));
             else
                 // nothing that could indicate size given... welp guess you're getting an array with 0 elements!
-                data.AddRange(GenerateIntLiteral(new IntLiteralNode(
+                writer.Append(GenerateIntLiteral(new IntLiteralNode(
                     0,
                     arrayCreation.Line,
                     arrayCreation.Column
                 ), destRegister));
-            data.AddRange([GetOpcode("arpshz"), destRegister, 0xFF, 0xFF]);
+            writer.Instructions.Add(new Instruction(GetOpcode("arpshz"), destRegister));
             if (arrayCreation.Initializers != null) // yes I'm checking that 2 times fight me
             {
                 byte initReg = _registers.AllocateRegister();
                 byte idxReg = _registers.AllocateRegister();
-                data.AddRange(GenerateIntLiteral(new IntLiteralNode(
+                writer.Append(GenerateIntLiteral(new IntLiteralNode(
                     0,
                     arrayCreation.Line,
                     arrayCreation.Column
@@ -740,11 +786,11 @@ namespace Mint.CodeGenerators
                 byte cpyReg = _registers.AllocateRegister();
                 for (int i = 0; i < arrayCreation.Initializers.Count; i++)
                 {
-                    data.AddRange(GenerateExpr(arrayCreation.Initializers[i], initReg));
-                    data.AddRange([GetOpcode("ldsrsr"), cpyReg, destRegister, 0xFF]);
-                    data.AddRange([GetOpcode("arirx"), cpyReg, idxReg, 0xFF]);
-                    data.AddRange([GetOpcode("stsrsr"), cpyReg, initReg, 0xFF]);
-                    data.AddRange([GetOpcode("inci32"), idxReg, 0xFF, 0xFF]);
+                    writer.Append(GenerateExpr(arrayCreation.Initializers[i], initReg));
+                    writer.Instructions.Add(new Instruction(GetOpcode("ldsrsr"), cpyReg, destRegister));
+                    writer.Instructions.Add(new Instruction(GetOpcode("arirx"), cpyReg, idxReg));
+                    writer.Instructions.Add(new Instruction(GetOpcode("stsrsr"), cpyReg, initReg));
+                    writer.Instructions.Add(new Instruction(GetOpcode("inci32"), idxReg));
                 }
                 _registers.FreeRegister(initReg);
                 _registers.FreeRegister(idxReg);
@@ -752,19 +798,19 @@ namespace Mint.CodeGenerators
             }
 
             _arrayRegs.Add(destRegister);
-            return data.ToArray();
+            return writer.Result;
         }
 
-        protected byte[] GenerateIncrement(IncrementNode increment, byte destRegister)
+        protected CodeWriter.CodeResult GenerateIncrement(IncrementNode increment, byte destRegister)
         {
-            List<byte> data = new();
+            CodeWriter writer = new();
 
             if (!increment.IsPrefix)
                 // Return the value (x++)
-                data.AddRange(GenerateExpr(increment.Target, destRegister));
+                writer.Append(GenerateExpr(increment.Target, destRegister));
 
             // Increment/Decrement it
-            data.AddRange(increment.Target switch
+            writer.Append(increment.Target switch
             {
                 IdentifierNode id => GenerateIdentifierIncrement(increment, id),
                 QualifiedAccessNode qa => GenerateQualifiedIncrement(increment, qa),
@@ -776,91 +822,115 @@ namespace Mint.CodeGenerators
 
             if (increment.IsPrefix)
                 // Return it after changing it (++x)
-                data.AddRange(GenerateExpr(increment.Target, destRegister));
+                writer.Append(GenerateExpr(increment.Target, destRegister));
 
-            return data.ToArray();
+            return writer.Result;
         }
 
-        protected byte[] GenerateIdentifierIncrement(IncrementNode increment, IdentifierNode identifier)
+        protected CodeWriter.CodeResult GenerateIdentifierIncrement(IncrementNode increment, IdentifierNode identifier)
             => GenerateIncrementRegister(increment, _registers.VarToReg[identifier.Name]);
 
-        protected byte[] GenerateQualifiedIncrement(IncrementNode increment, QualifiedAccessNode qualified)
+        protected CodeWriter.CodeResult GenerateQualifiedIncrement(IncrementNode increment, QualifiedAccessNode qualified)
         {
-            List<byte> data = new();
+            CodeWriter writer = new();
 
             byte valReg = _registers.AllocateRegister();
-            data.AddRange(GenerateQualifiedAccess(qualified, valReg));
+            writer.Append(GenerateQualifiedAccess(qualified, valReg));
 
-            data.AddRange(GenerateIncrementRegister(increment, valReg));
+            writer.Append(GenerateIncrementRegister(increment, valReg));
 
             ushort v = (ushort)AddOrGetXRef(qualified.FullName);
-            data.AddRange([GetOpcode("stsvsr"), valReg, (byte)((v >> 8) & 0xFF), (byte)(v & 0xFF)]);
+            (byte, byte) vBytes = CodeWriter.ToBytes(v);
+            writer.Instructions.Add(new Instruction(GetOpcode("stsvsr"), valReg, vBytes.Item1, vBytes.Item2));
 
             _registers.FreeRegister(valReg);
-            return data.ToArray();
+            return writer.Result;
         }
 
-        protected byte[] GenerateMemberIncrement(IncrementNode increment, MemberAccessNode member)
+        protected CodeWriter.CodeResult GenerateMemberIncrement(IncrementNode increment, MemberAccessNode member)
         {
-            List<byte> data = new();
+            CodeWriter writer = new();
 
             byte valReg = _registers.AllocateRegister();
-            data.AddRange(GenerateMemberAccess(member, valReg));
+            writer.Append(GenerateMemberAccess(member, valReg));
 
-            data.AddRange(GenerateIncrementRegister(increment, valReg));
+            writer.Append(GenerateIncrementRegister(increment, valReg));
 
             byte objReg = _registers.AllocateRegister();
-            data.AddRange(GenerateMemberSetup(member, objReg));
+            writer.Append(GenerateMemberSetup(member, objReg));
 
-            data.AddRange([GetOpcode("stsrsr"), objReg, valReg, 0xFF]);
+            writer.Instructions.Add(new Instruction(GetOpcode("stsrsr"), objReg, valReg));
 
             _registers.FreeRegister(valReg);
             _registers.FreeRegister(objReg);
-            return data.ToArray();
+            return writer.Result;
         }
 
-        protected byte[] GenerateArrayIncrement(IncrementNode increment, ArrayAccessNode array)
+        protected CodeWriter.CodeResult GenerateArrayIncrement(IncrementNode increment, ArrayAccessNode array)
         {
-            List<byte> data = new();
+            CodeWriter writer = new();
 
             byte valReg = _registers.AllocateRegister();
-            data.AddRange(GenerateArrayAccess(array, valReg));
+            writer.Append(GenerateArrayAccess(array, valReg));
 
-            data.AddRange(GenerateIncrementRegister(increment, valReg));
+            writer.Append(GenerateIncrementRegister(increment, valReg));
 
             byte arrReg = _registers.AllocateRegister();
-            data.AddRange(GenerateExpr(array.Array, arrReg));
+            writer.Append(GenerateExpr(array.Array, arrReg));
 
             byte idxReg = _registers.AllocateRegister();
-            data.AddRange(GenerateExpr(array.Index, idxReg));
+            writer.Append(GenerateExpr(array.Index, idxReg));
 
             byte cpyReg = _registers.AllocateRegister();
-            data.AddRange([GetOpcode("ldsrsr"), cpyReg, arrReg, 0xFF]);
+            writer.Instructions.Add(new Instruction(GetOpcode("ldsrsr"), cpyReg, arrReg));
 
-            data.AddRange([GetOpcode("arirx"), cpyReg, idxReg, 0xFF]);
-            data.AddRange([GetOpcode("stsrsr"), cpyReg, valReg, 0xFF]);
+            writer.Instructions.Add(new Instruction(GetOpcode("arirx"), cpyReg, idxReg));
+            writer.Instructions.Add(new Instruction(GetOpcode("stsrsr"), cpyReg, valReg));
 
             if (array.Array is not ArrayCreationNode)
                 _registers.FreeRegister(arrReg);
             _registers.FreeRegister(valReg);
             _registers.FreeRegister(idxReg);
             _registers.FreeRegister(cpyReg);
-            return data.ToArray();
+            return writer.Result;
         }
 
-        protected byte[] GenerateMemberSetup(MemberAccessNode member, byte destRegister)
+        protected CodeWriter.CodeResult GenerateMemberSetup(MemberAccessNode member, byte destRegister)
         {
-            List<byte> data = new();
+            CodeWriter writer = new();
 
-            data.AddRange(GenerateExpr(member.Object, destRegister));
+            writer.Append(GenerateExpr(member.Object, destRegister));
 
             ushort v = (ushort)AddOrGetXRef($"{_semantic.ExprTypes[member.Object]?.Name}.{member.Member}");
-            data.AddRange([GetOpcode("addofs"), destRegister, (byte)((v >> 8) & 0xFF), (byte)(v & 0xFF)]);
+            (byte, byte) vBytes = CodeWriter.ToBytes(v);
+            writer.Instructions.Add(new Instruction(GetOpcode("addofs"), destRegister, vBytes.Item1, vBytes.Item2));
 
-            return data.ToArray();
+            return writer.Result;
         }
 
-        protected byte[] GenerateIncrementRegister(IncrementNode increment, byte reg) => _semantic.ExprTypes[increment.Target]?.Name switch
+        protected CodeWriter.CodeResult GenerateIncrementRegister(IncrementNode increment, byte reg)
+        {
+            CodeWriter writer = new();
+
+            switch (_semantic.ExprTypes[increment.Target]?.Name)
+            {
+                case "int":
+                    writer.Instructions.Add(new Instruction(GetOpcode(increment.IsIncrement ? "inci32" : "deci32"), reg));
+                    break;
+                case "float":
+                    writer.Instructions.Add(new Instruction(GetOpcode(increment.IsIncrement ? "incf32" : "decf32"), reg));
+                    break;
+                default:
+                    throw new CodeGeneratorException(
+                        $"Cannot increment value of type '{_semantic.ExprTypes[increment.Target]?.Name}'.",
+                        increment.Line,
+                        increment.Column
+                    );
+            }
+
+            return writer.Result;
+        }
+            /*=> _semantic.ExprTypes[increment.Target]?.Name switch
         {
             "int" => [GetOpcode(increment.IsIncrement ? "inci32" : "deci32"), reg, 0xFF, 0xFF],
             "float" => [GetOpcode(increment.IsIncrement ? "incf32" : "decf32"), reg, 0xFF, 0xFF],
@@ -871,6 +941,7 @@ namespace Mint.CodeGenerators
                 increment.Column
             )
         };
+            */
 
         // Everything below are various utility functions
 
@@ -886,7 +957,7 @@ namespace Mint.CodeGenerators
             return index;
         }
 
-        protected byte GetOpcode(string name) => OpcodeHelper.CommonOpcodeByName[Version][name];
+        protected byte GetOpcode(string name) => OpcodeHelper.OpcodeByName[Version][name];
 
         protected bool DoesFunctionReturn(string fullName, IList<TypeNode> paramTypes)
         {
