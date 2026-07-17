@@ -43,7 +43,9 @@ namespace Mint
             ["const"]     = TokenType.Const,
             ["ref"]       = TokenType.Ref,
             ["module"]    = TokenType.Module,
-            ["do"]        = TokenType.Do
+            ["do"]        = TokenType.Do,
+            ["true"]      = TokenType.BoolLiteral,
+            ["false"]     = TokenType.BoolLiteral
         };
 
         public Lexer(string source)
