@@ -148,20 +148,28 @@ namespace Mint.Semantics
                         AddError("Expected a name that's not an object.", varDecl);
                         break;
                     }
+
                     TypeNode? initType = AnalyseExpr(varDecl.Initializer);
+                    if (initType == null)
+                    {
+                        AddError($"Cannot assign 'void' to variable '{varDecl.Name}'.", varDecl);
+                        break;
+                    }
+
+                    CheckReferenceAssign(varDecl.Type, initType);
+
                     if (!TypesMatch(varDecl.Type, initType))
                         AddError(
                             $"Cannot assign '{initType?.Name}' to variable of type '{varDecl.Type.Name}'",
                             varDecl
                         );
+
                     _scopeStack.Define(varDecl.Name, varDecl.Type);
                     break;
 
                 case AssignNode assign:
                     // First catch if we're trying to assign to something that can't be assigned to
-                    if (!(assign.Target is IdentifierNode or QualifiedAccessNode or MemberAccessNode or ArrayAccessNode) ||
-                        (assign.Target is IdentifierNode ident && IsObject(ident.Name)) ||
-                        (assign.Target is QualifiedAccessNode qa && IsObject(qa.FullName)))
+                    if (assign.Target is not IAssignable)
                     {
                         AddError("Assignment is not allowed.", assign);
                         break;
@@ -173,6 +181,12 @@ namespace Mint.Semantics
                         AddError("Assignment to 'void' is not allowed.", assign);
                         break;
                     }
+                    if (assignType == null)
+                    {
+                        AddError("Cannot assign 'void' to assignable.", assign);
+                        break;
+                    }
+                    CheckReferenceAssign(targetType, assignType);
                     if (targetType.IsConst)
                     {
                         AddError("Assignment to a constant value isn't allowed.", assign);
@@ -250,6 +264,7 @@ namespace Mint.Semantics
                 QualifiedAccessNode qa => ResolveQualifiedAccessType(qa),
                 MemberAccessNode ma => ResolveMemberAccessType(ma),
                 ArrayAccessNode aa => ResolveArrayAccessType(aa),
+                DereferenceNode dr => ResolveDereferenceType(dr),
                 ThisNode ts => ResolveThisType(ts),
                 BinaryExprNode be => ResolveBinaryExprType(be),
                 UnaryExprNode ue => ResolveUnaryExprType(ue),
@@ -259,7 +274,7 @@ namespace Mint.Semantics
                 PushInstanceNode pi => ResolvePushInstanceType(pi),
                 ArrayCreationNode ac => ResolveArrayCreationType(ac),
                 IncrementNode inc => ResolveIncrementType(inc),
-                // TODO : add more types of expressions for versions with oop
+                MemberOffsetNode mo => ResolveMemberOffsetType(mo),
 
                 _ => null
             };
@@ -324,36 +339,9 @@ namespace Mint.Semantics
                 return type;
             }
 
-            // Find it in the classes (or xrefs)
-            if (_module.LocalObjects.TryGetValue(exprType.Name, out ObjectSymbol? obj))
-            {
-                if (obj.Variables.TryGetValue(memberAccess.Member, out VariableSymbol? varSbl))
-                {
-                    _exprTypes[memberAccess] = varSbl.Type;
-                    return varSbl.Type;
-                }
-
-                AddError($"'{exprType.Name}' has no member '{memberAccess.Member}'.", memberAccess);
-                _exprTypes[memberAccess] = null;
-                return null;
-            }
-
-            if (_module.XRefObjects.TryGetValue(exprType.Name, out XRefSymbol? xrefObj))
-            {
-                if (xrefObj.Variables.TryGetValue(memberAccess.Member, out VariableSymbol? xrefVar))
-                {
-                    _exprTypes[memberAccess] = xrefVar.Type;
-                    return xrefVar.Type;
-                }
-
-                AddError($"'{exprType.Name}' has no member '{memberAccess.Member}'. Did you forget to reference it in the xref ?", memberAccess);
-                _exprTypes[memberAccess] = null;
-                return null;
-            }
-
-            AddError($"'{exprType.Name}' is not a known object. Did you forget to reference it with the 'xref' keyword ?", memberAccess);
-            _exprTypes[memberAccess] = null;
-            return null;
+            TypeNode? accessType = ResolveMemberType(exprType, memberAccess.Member);
+            _exprTypes[memberAccess] = accessType;
+            return accessType;
         }
 
         private TypeNode? ResolveArrayAccessType(ArrayAccessNode arrayAccess)
@@ -374,6 +362,26 @@ namespace Mint.Semantics
             //TypeNode type = new(arrayType.Name, ar, arrayAccess.Line, arrayAccess.Column, true);
             TypeNode type = arrayType with { IsArray = false };
             _exprTypes[arrayAccess] = type;
+            return type;
+        }
+
+        private TypeNode? ResolveDereferenceType(DereferenceNode dereference)
+        {
+            TypeNode? type = AnalyseExpr(dereference.Reference);
+            if (type == null)
+            {
+                AddError("Cannot dereference 'void'.", dereference);
+                _exprTypes[dereference] = null; 
+                return null;
+            }
+            if (!type.IsRef)
+            {
+                AddError("Cannot dereference non-reference type.", dereference);
+                _exprTypes[dereference] = null;
+                return null;
+            }
+            type = type with { IsRef = false };
+            _exprTypes[dereference] = type;
             return type;
         }
 
@@ -526,7 +534,7 @@ namespace Mint.Semantics
 
         private TypeNode? ResolvePushInstanceType(PushInstanceNode pushInstance)
         {
-            TypeNode type = new(pushInstance.ObjectName, true, false, pushInstance.Line, pushInstance.Column);
+            TypeNode type = new(pushInstance.ObjectName, true, true, pushInstance.Line, pushInstance.Column);
             _exprTypes[pushInstance] = type;
             return type;
         }
@@ -554,6 +562,52 @@ namespace Mint.Semantics
             }
             AddError($"Increment and decrement operations are only allowed on types 'int' and 'float'. Not type '{type.Name}'.", increment);
             _exprTypes[increment] = null;
+            return null;
+        }
+
+        private TypeNode? ResolveMemberOffsetType(MemberOffsetNode memberOffset)
+        {
+            TypeNode? objType = AnalyseExpr(memberOffset.Object);
+            if (objType == null)
+            {
+                AddError($"Cannot get offset for member '{memberOffset.Member}' from 'void'.", memberOffset);
+                _exprTypes[memberOffset] = null;
+                return null;
+            }
+
+            TypeNode? memberType = ResolveMemberType(objType, memberOffset.Member);
+            if (memberType == null)
+            {
+                _exprTypes[memberOffset] = null;
+                return null;
+            }
+            memberType = memberType with { IsRef = true };
+            _exprTypes[memberOffset] = memberType;
+            return memberType;
+        }
+
+        private TypeNode? ResolveMemberType(TypeNode objType, string member)
+        {
+            // Find it in the classes (or xrefs)
+            if (_module.LocalObjects.TryGetValue(objType.Name, out ObjectSymbol? obj))
+            {
+                if (obj.Variables.TryGetValue(member, out VariableSymbol? varSbl))
+                    return varSbl.Type;
+
+                AddError($"'{objType.Name}' has no member '{member}'.", objType);
+                return null;
+            }
+
+            if (_module.XRefObjects.TryGetValue(objType.Name, out XRefSymbol? xrefObj))
+            {
+                if (xrefObj.Variables.TryGetValue(member, out VariableSymbol? xrefVar))
+                    return xrefVar.Type;
+
+                AddError($"'{objType.Name}' has no member '{member}'. Did you forget to reference it ?", objType);
+                return null;
+            }
+
+            AddError($"'{objType.Name}' is not a known object. Did you forget to reference it ?", objType);
             return null;
         }
 
@@ -592,7 +646,9 @@ namespace Mint.Semantics
         private static bool TypesMatch(TypeNode? a,  TypeNode? b)
         {
             if (a == null || b == null) return false;
-            return a.Name == b.Name && a.IsArray == b.IsArray;
+            return (a.Name == b.Name && a.IsArray == b.IsArray && a.IsRef == b.IsRef) ||
+                   (a.IsRef && !b.IsRef && b.Name == "int") ||
+                   (b.IsRef && !a.IsRef && a.Name == "int");
         }
 
         private void AddError(string message, AstNode node)
@@ -601,5 +657,12 @@ namespace Mint.Semantics
         private bool IsObject(string name) => _module.LocalObjects.ContainsKey(name) || _module.XRefObjects.ContainsKey(name);
 
         private string GetFullObjectName(string objName) => $"{NameOperations.GetParent(_module.Name)}.{objName}";
+
+        private void CheckReferenceAssign(TypeNode targetType, TypeNode valueType)
+        {
+            if (targetType.IsRef && !valueType.IsRef && valueType.Name != "int")
+                AddError("The target for the assignment is a reference and thus must be assigned another reference. " +
+                    "You can also reinterpret an 'int' as a pointer.", targetType);
+        }
     }
 }

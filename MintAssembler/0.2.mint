@@ -8,6 +8,11 @@ namespace HEL.Math
 		void SetX(float);
 		float GetX();
 	}
+
+	extern object Direction3
+	{
+		
+	}
 }
 
 namespace Scn.Step.Hero
@@ -65,7 +70,7 @@ object TestClass
 	
 		HEL.Math.Vector3.SetX(0.5);
 
-		HEL.Math.Vector3 vec = HEL.Math.Vector3;
+		ref HEL.Math.Vector3 vec = HEL.Math.Vector3;
 		vec.x = 3.0;
 		/*
 		They also work like this.
@@ -113,6 +118,15 @@ object TestClass
 
 		float[] myArray2 = new float[3];
 		myArray2[0] = 1.0;
+
+		// ref are pointers
+		ref int myPtr = 0x80001234; // a ram address
+		const int myValue = *myPtr;
+		(*myPtr)++;
+		*myPtr = 3;
+
+		ref float savedXPtr = vec->x;
+		float savedX = *savedXPtr;
 	}
 
 	float GetVec()

@@ -86,6 +86,7 @@ namespace Mint
         DoubleGreaterEquals, // >>=
         DoubleAmpersand,     // &&
         DoublePipe,          // ||
+        Arrow,               // ->
 
         // Punctuation
         Semicolon,          // ;

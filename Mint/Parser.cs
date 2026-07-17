@@ -341,6 +341,10 @@ namespace Mint
             if (Check(TokenType.Const))
                 return true;
 
+            // Same with ref
+            if (Check(TokenType.Ref))
+                return true;
+
             // Check for the basic 4
             if (Current.Type is TokenType.Int or TokenType.Float or TokenType.Bool or TokenType.String)
                 return true;
@@ -716,7 +720,7 @@ namespace Mint
 
         private void CheckTargetIncrement(ExprNode expr, int line, int col)
         {
-            if (!(expr is IdentifierNode or ArrayAccessNode or MemberAccessNode or QualifiedAccessNode))
+            if (expr is not IAssignable)
                 throw new ParserException("Cannot increment/decrement on this expression.", line, col);
         }
 
@@ -775,6 +779,11 @@ namespace Mint
                         expr = new MemberCallNode(expr, member, args, line, col);
                     }
                     else expr = new MemberAccessNode(expr, member, line, col);
+                }
+                else if (Match(TokenType.Arrow))
+                {
+                    string member = Expect(TokenType.Identifier).Value;
+                    expr = new MemberOffsetNode(expr, member, line, col);
                 }
                 else break;
             }
@@ -891,6 +900,9 @@ namespace Mint
                 // it's just a lone 'this'
                 return new ThisNode(line, col);
             }
+
+            if (Match(TokenType.Star))
+                return new DereferenceNode(ParseExpression(), line, col);
 
             throw new ParserException($"Unexpected token '{Current.Value}'", Current.Line, Current.Column);
         }

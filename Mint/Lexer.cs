@@ -229,6 +229,9 @@ namespace Mint
                         case '-':
                             Advance();
                             return new Token(TokenType.DoubleMinus, "--", line, col);
+                        case '>':
+                            Advance();
+                            return new Token(TokenType.Arrow, "->", line, col);
                     }
                     return new Token(TokenType.Minus, "-", line, col);
                 case '*':

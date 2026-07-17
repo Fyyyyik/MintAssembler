@@ -194,6 +194,7 @@ namespace Mint.CodeGenerators
                 ArrayAccessNode aa => GenerateArrayAssign(assign, aa),
                 MemberAccessNode ma => GenerateMemberAssign(assign, ma),
                 QualifiedAccessNode qa => GenerateQualifiedAssign(assign, qa),
+                DereferenceNode dr => GenerateDereferenceAssign(assign, dr),
 
                 _ => throw new CodeGeneratorException($"Unknown assign target node : {assign.Target}", assign.Line, assign.Column)
             };
@@ -259,6 +260,23 @@ namespace Mint.CodeGenerators
             writer.Instructions.Add(new Instruction(GetOpcode("stsvsr"), valReg, vBytes.Item1, vBytes.Item2));
 
             _registers.FreeRegister(valReg);
+            return writer.Result;
+        }
+
+        protected CodeWriter.CodeResult GenerateDereferenceAssign(AssignNode assign, DereferenceNode dereference)
+        {
+            CodeWriter writer = new();
+
+            byte valReg = _registers.AllocateRegister();
+            writer.Append(GenerateExpr(assign.Value, valReg));
+
+            byte refReg = _registers.AllocateRegister();
+            writer.Append(GenerateExpr(dereference.Reference, refReg));
+
+            writer.Instructions.Add(new Instruction(GetOpcode("stsrsr"), refReg, valReg));
+
+            _registers.FreeRegister(valReg);
+            _registers.FreeRegister(refReg);
             return writer.Result;
         }
 
@@ -432,6 +450,7 @@ namespace Mint.CodeGenerators
             QualifiedAccessNode qa => GenerateQualifiedAccess(qa, destRegister),
             MemberAccessNode ma => GenerateMemberAccess(ma, destRegister),
             ArrayAccessNode aa => GenerateArrayAccess(aa, destRegister),
+            DereferenceNode dr => GenerateDereference(dr, destRegister),
             ThisNode => GenerateThis(destRegister),
             BinaryExprNode be => GenerateBinaryExpr(be, destRegister),
             UnaryExprNode ue => GenerateUnaryExpr(ue, destRegister),
@@ -440,6 +459,7 @@ namespace Mint.CodeGenerators
             PushInstanceNode pi => GeneratePushInstance(pi, destRegister),
             ArrayCreationNode ac => GenerateArrayCreation(ac, destRegister),
             IncrementNode inc => GenerateIncrement(inc, destRegister),
+            MemberOffsetNode mo => GenerateMemberOffset(mo, destRegister),
 
             _ => throw new CodeGeneratorException($"Invalid expression node for this version : {expr}", expr.Line, expr.Column)
         };
@@ -542,6 +562,19 @@ namespace Mint.CodeGenerators
                 _registers.FreeRegister(arrReg);
             _registers.FreeRegister(idxReg);
             _registers.FreeRegister(cpyReg);
+            return writer.Result;
+        }
+
+        protected CodeWriter.CodeResult GenerateDereference(DereferenceNode dereference, byte destRegister)
+        {
+            CodeWriter writer = new();
+
+            byte refReg = _registers.AllocateRegister();
+            writer.Append(GenerateExpr(dereference.Reference, refReg));
+
+            writer.Instructions.Add(new Instruction(GetOpcode("ldsra4"), destRegister, refReg));
+
+            _registers.FreeRegister(refReg);
             return writer.Result;
         }
 
@@ -816,6 +849,7 @@ namespace Mint.CodeGenerators
                 QualifiedAccessNode qa => GenerateQualifiedIncrement(increment, qa),
                 MemberAccessNode ma => GenerateMemberIncrement(increment, ma),
                 ArrayAccessNode aa => GenerateArrayIncrement(increment, aa),
+                DereferenceNode dr => GenerateDereferenceIncrement(increment, dr),
 
                 _ => throw new CodeGeneratorException($"Cannot increment target node {increment.Target}.", increment.Line, increment.Column)
             });
@@ -892,6 +926,40 @@ namespace Mint.CodeGenerators
             _registers.FreeRegister(valReg);
             _registers.FreeRegister(idxReg);
             _registers.FreeRegister(cpyReg);
+            return writer.Result;
+        }
+
+        protected CodeWriter.CodeResult GenerateDereferenceIncrement(IncrementNode increment, DereferenceNode dereference)
+        {
+            CodeWriter writer = new();
+
+            byte valReg = _registers.AllocateRegister();
+            writer.Append(GenerateDereference(dereference, valReg));
+
+            writer.Append(GenerateIncrementRegister(increment, valReg));
+
+            byte refReg = _registers.AllocateRegister();
+            writer.Append(GenerateExpr(dereference.Reference, refReg));
+
+            writer.Instructions.Add(new Instruction(GetOpcode("stsrsr"), refReg, valReg));
+
+            _registers.FreeRegister(refReg);
+            _registers.FreeRegister(valReg);
+            return writer.Result;
+        }
+
+        protected CodeWriter.CodeResult GenerateMemberOffset(MemberOffsetNode memberOffset, byte destRegister)
+        {
+            CodeWriter writer = new();
+
+            byte objReg = _registers.AllocateRegister();
+            writer.Append(GenerateExpr(memberOffset.Object, objReg));
+
+            ushort v = (ushort)AddOrGetXRef($"{_semantic.ExprTypes[memberOffset.Object]?.Name}.{memberOffset.Member}");
+            (byte, byte) vBytes = CodeWriter.ToBytes(v);
+            writer.Instructions.Add(new Instruction(GetOpcode("addofs"), destRegister, vBytes.Item1, vBytes.Item2));
+
+            _registers.FreeRegister(objReg);
             return writer.Result;
         }
 

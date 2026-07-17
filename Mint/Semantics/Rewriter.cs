@@ -159,6 +159,7 @@ namespace Mint.Semantics
                 Array = RewriteExpression(aa.Array),
                 Index = RewriteExpression(aa.Index)
             },
+            DereferenceNode dr => dr with { Reference = RewriteExpression(dr.Reference) },
             BinaryExprNode be => be with
             {
                 Left = RewriteExpression(be.Left),
@@ -169,6 +170,7 @@ namespace Mint.Semantics
             MemberCallNode mc => RewriteMemberCall(mc),
             ArrayCreationNode ac => RewriteArrayCreation(ac),
             IncrementNode inc => inc with { Target = RewriteExpression(inc.Target) },
+            MemberOffsetNode mo => mo with { Object = RewriteExpression(mo.Object) },
 
             _ => expr
         };
