@@ -7,13 +7,7 @@ namespace Mint
 {
     public class VersionRules
     {
-        public ReadOnlyCollection<byte> Version { get; }
         public HashSet<TokenType> IllegalTokens { get; init; } = new();
-
-        public VersionRules(IList<byte> version)
-        {
-            Version = new ReadOnlyCollection<byte>(version);
-        }
 
         private bool IsTokenLegal(Token token)
         {
@@ -25,10 +19,33 @@ namespace Mint
             foreach (Token token in tokens)
                 if (!IsTokenLegal(token))
                     throw new LexerException(
-                        $"'{token.Value}' is not supported in version {Version.ToString()}",
+                        $"'{token.Value}' is not supported.",
                         token.Line,
                         token.Column
                     );
         }
+
+        public static VersionRules GetRules(string version) => version switch
+        {
+            "0.2" => new VersionRules()
+            {
+                IllegalTokens = new()
+            {
+                TokenType.Byte,
+                TokenType.UShort,
+                TokenType.UInt,
+                TokenType.ULong,
+                TokenType.SByte,
+                TokenType.Short,
+                TokenType.Long,
+                TokenType.Double,
+                TokenType.Char,
+                TokenType.WString,
+                TokenType.Register
+            }
+            },
+
+            _ => throw new NotImplementedException($"Cannot get rules for version {version}")
+        };
     }
 }

@@ -82,6 +82,8 @@ namespace MintAssembler
         {
             _verbose = options.IsVerbose;
 
+            VersionRules rules = VersionRules.GetRules(options.Version);
+
             WriteVerbose("Compile command started, checking for input file...");
 
             if (!options.InputFile.Exists)
@@ -94,7 +96,11 @@ namespace MintAssembler
 
             List<Token> tokens = new Lexer(File.ReadAllText(options.InputFile.FullName)).Tokenize();
 
-            WriteVerbose($"Made {tokens.Count} tokens!\nBuilding the syntax tree...");
+            WriteVerbose($"Made {tokens.Count} tokens!\nValidating tokens...");
+
+            rules.ValidateTokens(tokens);
+
+            WriteVerbose("All tokens are valid. Building the initial syntax tree...");
 
             ModuleNode module = new Parser(tokens).Parse();
 
@@ -166,7 +172,7 @@ namespace MintAssembler
             WriteVerbose($"Building the syntax tree has finished. Found {module.Objects.Count} objects.\n" +
                     "Rewriting and resolving types...");
 
-            SemanticResult result = new SemanticAnalyser(new VersionRules([0x00, 0x02])).Analyse(module, out ModuleNode rewritten);
+            SemanticResult result = new SemanticAnalyser(rules).Analyse(module, out ModuleNode rewritten);
 
             if (options.IsVerbose || result.Errors.Count > 0)
             {

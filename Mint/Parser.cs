@@ -840,7 +840,7 @@ namespace Mint
                 if (type.Name is "int" or "float" or "bool" or "string")
                     throw new ParserException($"Cannot create new instance of '{type.Name}'.", line, col);
 
-                // Object creation doesn't call a constructor so no parentheses and params
+                // Object creation doesn't call a constructor so no parentheses and params (for now)
                 return new NewObjectNode(type.Name, line, col);
             }
 
