@@ -7,7 +7,8 @@ namespace Mint
     public enum TokenType
     {
         // Literals
-        IntLiteral,
+        DecimalLiteral,
+        HexLiteral,
         FloatLiteral,
         StringLiteral,
         BoolLiteral,

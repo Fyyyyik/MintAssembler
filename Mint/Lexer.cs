@@ -119,14 +119,14 @@ namespace Mint
         {
             StringBuilder sb = new();
 
-            if (Current == '0' && Current == 'x')
+            if (Current == '0' && Peek == 'x')
             {
-                // Hex value, always assume it's an int
+                // Hex value
                 sb.Append(Advance());
                 sb.Append(Advance());
                 while (char.IsAsciiHexDigit(Current))
                     sb.Append(Advance());
-                return new Token(TokenType.IntLiteral, sb.ToString(), line, col);
+                return new Token(TokenType.HexLiteral, sb.ToString(), line, col);
             }
 
             while (char.IsDigit(Current))
@@ -141,7 +141,7 @@ namespace Mint
                 return new Token(TokenType.FloatLiteral, sb.ToString(), line, col);
             }
 
-            return new Token(TokenType.IntLiteral, sb.ToString(), line, col);
+            return new Token(TokenType.DecimalLiteral, sb.ToString(), line, col);
         }
 
         private Token ReadString(int line, int col)

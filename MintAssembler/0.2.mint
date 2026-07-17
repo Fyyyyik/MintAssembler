@@ -53,7 +53,8 @@ object TestClass
 {
 	void Exec()
 	{
-		const int VALUE = 6;
+		// hex values are like this
+		const int VALUE = 0xC3;
 
 		// Not allowed, will give an error when compiling
 		//VALUE = 5;

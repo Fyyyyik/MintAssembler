@@ -787,8 +787,10 @@ namespace Mint
             var (line, col) = CurrentPosition;
 
             // Literals
-            if (Check(TokenType.IntLiteral))
+            if (Check(TokenType.DecimalLiteral))
                 return new IntLiteralNode(int.Parse(_tokens[_pos++].Value), line, col);
+            if (Check(TokenType.HexLiteral))
+                return new IntLiteralNode(Convert.ToInt32(_tokens[_pos++].Value, 16), line, col);
             if (Check(TokenType.FloatLiteral))
                 return new FloatLiteralNode(float.Parse(_tokens[_pos++].Value), line, col);
             if (Check(TokenType.BoolLiteral))
