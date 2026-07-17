@@ -249,7 +249,7 @@ namespace Mint
             return types;
         }
 
-        private TypeNode? ParseType()
+        public TypeNode? ParseType()
         {
             var (line, col) = CurrentPosition;
 

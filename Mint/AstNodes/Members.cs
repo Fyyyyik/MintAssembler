@@ -35,5 +35,24 @@ namespace Mint.AstNodes
         List<TypeNode> ParamTypes,
         int Line,
         int Column
-    ) : MemberNode(Line, Column);
+    ) : MemberNode(Line, Column)
+    {
+        public string GetNameWithArgs()
+        {
+            StringBuilder sb = new($"{Name}(");
+            for (int i = 0; i < ParamTypes.Count; i++)
+            {
+                if (ParamTypes[i].IsConst)
+                    sb.Append("const ");
+                if (ParamTypes[i].IsRef)
+                    sb.Append("ref ");
+                sb.Append(ParamTypes[i].Name);
+
+                if (i != ParamTypes.Count - 1)
+                    sb.Append(',');
+            }
+            sb.Append(')');
+            return sb.ToString();
+        }
+    }
 }

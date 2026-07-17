@@ -10,6 +10,6 @@ namespace MintAssembler
         internal required string Version { get; init; }
         internal required bool IsVerbose { get; init; }
         internal string? OutputPath { get; init; }
-        internal FileInfo? TargetArchive { get; init; }
+        internal List<FileInfo>? Archives { get; init; }
     }
 }
