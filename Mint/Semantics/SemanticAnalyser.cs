@@ -372,7 +372,7 @@ namespace Mint.Semantics
             }
 
             //TypeNode type = new(arrayType.Name, ar, arrayAccess.Line, arrayAccess.Column, true);
-            TypeNode type = arrayType with { IsArray = true };
+            TypeNode type = arrayType with { IsArray = false };
             _exprTypes[arrayAccess] = type;
             return type;
         }

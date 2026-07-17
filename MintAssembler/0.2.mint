@@ -106,6 +106,13 @@ object TestClass
 
 		do count--;
 		while (GObj.FootState.IsAir());
+
+		// Arrays
+		int[] myArray1 = new int[] { 1, 2, 3, 4 };
+		myArray1[1] = 5;
+
+		float[] myArray2 = new float[3];
+		myArray2[0] = 1.0;
 	}
 
 	float GetVec()
