@@ -8,6 +8,7 @@ namespace Mint
     public class VersionRules
     {
         public HashSet<TokenType> IllegalTokens { get; init; } = new();
+        public HashSet<string> Dereferenceable { get; init; } = new();
 
         private bool IsTokenLegal(Token token)
         {
@@ -30,19 +31,24 @@ namespace Mint
             "0.2" => new VersionRules()
             {
                 IllegalTokens = new()
-            {
-                TokenType.Byte,
-                TokenType.UShort,
-                TokenType.UInt,
-                TokenType.ULong,
-                TokenType.SByte,
-                TokenType.Short,
-                TokenType.Long,
-                TokenType.Double,
-                TokenType.Char,
-                TokenType.WString,
-                TokenType.Register
-            }
+                {
+                    TokenType.Byte,
+                    TokenType.UShort,
+                    TokenType.UInt,
+                    TokenType.ULong,
+                    TokenType.SByte,
+                    TokenType.Short,
+                    TokenType.Long,
+                    TokenType.Double,
+                    TokenType.Char,
+                    TokenType.WString,
+                    TokenType.Register
+                },
+                Dereferenceable = new()
+                {
+                    "int",
+                    "float"
+                }
             },
 
             _ => throw new NotImplementedException($"Cannot get rules for version {version}")

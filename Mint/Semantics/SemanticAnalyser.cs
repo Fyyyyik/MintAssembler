@@ -149,6 +149,12 @@ namespace Mint.Semantics
                         break;
                     }
 
+                    if (_scopeStack.LookUp(varDecl.Name) != null)
+                    {
+                        AddError($"A variable with the name '{varDecl.Name}' has already been declared.", varDecl);
+                        break;
+                    }
+
                     TypeNode? initType = AnalyseExpr(varDecl.Initializer);
                     if (initType == null)
                     {
@@ -372,6 +378,12 @@ namespace Mint.Semantics
             {
                 AddError("Cannot dereference 'void'.", dereference);
                 _exprTypes[dereference] = null; 
+                return null;
+            }
+            if (!_rules.Dereferenceable.Contains(type.Name))
+            {
+                AddError($"Cannot dereference type '{type.Name}' in this version.", dereference);
+                _exprTypes[dereference] = null;
                 return null;
             }
             if (!type.IsRef)

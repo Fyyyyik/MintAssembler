@@ -72,9 +72,12 @@ object TestClass
 
 		ref HEL.Math.Vector3 vec = HEL.Math.Vector3;
 		vec.x = 3.0;
+
 		/*
-		They also work like this.
+		They also work
+		like this.
 		*/
+
 		for (float f = 0.0; f < vec.x; ++f)
 		{
 			GObj.FootState.IsGround();
@@ -127,6 +130,8 @@ object TestClass
 
 		ref float savedXPtr = vec->x;
 		float savedX = *savedXPtr;
+
+		ref float myPtr2 = 0x80005678;
 	}
 
 	float GetVec()
