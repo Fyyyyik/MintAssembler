@@ -250,7 +250,7 @@ namespace Mint.Semantics
                 joinedQualif = $"{NameOperations.GetParent(_moduleSymbols.Name)}.{joinedQualif}";
 
             if (qcIndex == names.Length - 1)
-                return qc with { FullName = joinedQualif };
+                return qc with { FullName = joinedQualif, Args = rewrittenArgs };
 
             return BuildMemberCall(new QualifiedAccessNode(
                 string.Join('.', names[..(qcIndex + 1)]),

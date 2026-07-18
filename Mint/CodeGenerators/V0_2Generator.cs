@@ -93,7 +93,10 @@ namespace Mint.CodeGenerators
             foreach (ParamNode param in _currentFunction.Parameters)
                 _registers.AllocateRegister(param.Name);
 
-            string retTypeName = _currentFunction.ReturnType == null ? "void" : _currentFunction.ReturnType.Name;
+            string retTypeName = "void";
+            if (_currentFunction.ReturnType != null)
+                retTypeName = GetTypeName(_currentFunction.ReturnType);
+
             MintFunction mintFunc = new($"{retTypeName} {AppendParamTypes(funcNode.Name, Utility.ToTypeNodes(_currentFunction.Parameters))}")
             {
                 Arguments = (uint)funcNode.Params.Count,
@@ -1054,9 +1057,9 @@ namespace Mint.CodeGenerators
             StringBuilder sb = new(fullName);
             sb.Append('(');
             if (paramTypes.Count > 0)
-                sb.Append(paramTypes[0].Name);
+                sb.Append(GetTypeName(paramTypes[0]));
             for (int i = 1; i < paramTypes.Count; i++)
-                sb.Append($",{paramTypes[i].Name}");
+                sb.Append($",{GetTypeName(paramTypes[i])}");
             sb.Append(')');
             return sb.ToString();
         }
@@ -1071,6 +1074,16 @@ namespace Mint.CodeGenerators
                 (byte)((bits >> 8) & 0xFF),
                 (byte)(bits & 0xFF)
             ];
+        }
+
+        private static string GetTypeName(TypeNode type)
+        {
+            string name = type.Name;
+            if (type.IsRef)
+                name = "ref " + name;
+            if (type.IsConst)
+                name = "const " + name;
+            return name;
         }
     }
 }
