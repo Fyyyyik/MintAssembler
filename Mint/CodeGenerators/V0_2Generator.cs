@@ -5,6 +5,7 @@ using OneOf;
 using System;
 using System.Collections.Generic;
 using System.Data;
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices.Marshalling;
 using System.Text;
@@ -97,7 +98,10 @@ namespace Mint.CodeGenerators
             if (_currentFunction.ReturnType != null)
                 retTypeName = GetTypeName(_currentFunction.ReturnType);
 
-            MintFunction mintFunc = new($"{retTypeName} {AppendParamTypes(funcNode.Name, Utility.ToTypeNodes(_currentFunction.Parameters))}")
+            string mintName = $"{retTypeName} {AppendParamTypes(funcNode.Name, Utility.ToTypeNodes(_currentFunction.Parameters))}";
+            if (funcNode.IsConst)
+                mintName += "const";
+            MintFunction mintFunc = new(mintName)
             {
                 Arguments = (uint)funcNode.Params.Count,
                 Data = GenerateBlock(funcNode.Body, true).Data
@@ -685,24 +689,16 @@ namespace Mint.CodeGenerators
         {
             CodeWriter writer = new();
 
+            TypeNode[] argTypes = GetTypesFromArgs(qualifiedCall.Args, qualifiedCall.Line, qualifiedCall.Column);
+
+            writer.Append(TryGenerateReturnInstanceSetup(qualifiedCall.FullName, argTypes, destRegister, out bool isReturn));
+
             List<byte> regs = new();
-            List<TypeNode> argTypes = new();
             foreach (ExprNode arg in qualifiedCall.Args)
             {
                 regs.Add(_registers.AllocateRegister());
                 writer.Append(GenerateExpr(arg, regs[^1]));
-
-                TypeNode? argType = _semantic.ExprTypes[arg];
-                if (argType == null)
-                    throw new CodeGeneratorException(
-                        "Argument cannot be of type 'void'.",
-                        qualifiedCall.Line,
-                        qualifiedCall.Column
-                    );
-                argTypes.Add(argType);
             }
-
-            bool isReturn = DoesFunctionReturn(qualifiedCall.FullName, argTypes);
 
             for (int i = 0; i < regs.Count; i++)
                 writer.Instructions.Add(new Instruction(GetOpcode("ldfrsr"), (byte)(isReturn ? i + 1 : i), regs[i]));
@@ -723,25 +719,7 @@ namespace Mint.CodeGenerators
         {
             CodeWriter writer = new();
 
-            byte objReg = _registers.AllocateRegister();
-            writer.Append(GenerateExpr(memberCall.Object, objReg));
-
-            List<byte> regs = new();
-            List<TypeNode> argTypes = new();
-            foreach (ExprNode arg in memberCall.Args)
-            {
-                regs.Add(_registers.AllocateRegister());
-                writer.Append(GenerateExpr(arg, regs[^1]));
-
-                TypeNode? argType = _semantic.ExprTypes[arg];
-                if (argType == null)
-                    throw new CodeGeneratorException(
-                        "Argument cannot be of type 'void'.",
-                        memberCall.Line,
-                        memberCall.Column
-                    );
-                argTypes.Add(argType);
-            }
+            TypeNode[] argTypes = GetTypesFromArgs(memberCall.Args, memberCall.Line, memberCall.Column);
 
             TypeNode? objType = _semantic.ExprTypes[memberCall.Object];
             if (objType == null)
@@ -750,8 +728,19 @@ namespace Mint.CodeGenerators
                     memberCall.Line,
                     memberCall.Column
                 );
+
             string fullName = $"{objType.Name}.{memberCall.Name}";
-            bool isReturn = DoesFunctionReturn(fullName, argTypes);
+            writer.Append(TryGenerateReturnInstanceSetup(fullName, argTypes, destRegister, out bool isReturn));
+
+            byte objReg = _registers.AllocateRegister();
+            writer.Append(GenerateExpr(memberCall.Object, objReg));
+
+            List<byte> regs = new();
+            foreach (ExprNode arg in memberCall.Args)
+            {
+                regs.Add(_registers.AllocateRegister());
+                writer.Append(GenerateExpr(arg, regs[^1]));
+            }
 
             writer.Instructions.Add(new Instruction(
                 GetOpcode("ldfrsr"),
@@ -776,6 +765,58 @@ namespace Mint.CodeGenerators
             foreach (byte reg in regs)
                 _registers.FreeRegister(reg);
             return writer.Result;
+        }
+
+        private CodeWriter.CodeResult TryGenerateReturnInstanceSetup(
+            string funcName,
+            IList<TypeNode> argTypes,
+            byte destRegister,
+            out bool isReturn)
+        {
+            CodeWriter writer = new();
+
+            isReturn = false;
+            if (DoesFunctionReturn(funcName, argTypes, out TypeNode? returnType))
+            {
+                isReturn = true;
+                if (_semantic.Module.LocalObjects.ContainsKey(returnType.Name) ||
+                    _semantic.Module.XRefObjects.ContainsKey(returnType.Name))
+                {
+                    if (_instanceRegs.TryGetValue(destRegister, out string? instName) && instName != returnType.Name)
+                    {
+                        // register has the wrong instance pushed, pop it
+                        ushort popV = (ushort)AddOrGetXRef(instName);
+                        (byte, byte) popVBytes = CodeWriter.ToBytes(popV);
+                        writer.Instructions.Add(new Instruction(GetOpcode("sppop"), destRegister, popVBytes.Item1, popVBytes.Item2));
+                    }
+                    else if (instName != null)
+                        return writer.Result; // register already has the correct instance pushed
+
+                    ushort spV = (ushort)AddOrGetXRef(returnType.Name);
+                    (byte, byte) spVBytes = CodeWriter.ToBytes(spV);
+                    writer.Instructions.Add(new Instruction(GetOpcode("sppsh"), destRegister, spVBytes.Item1, spVBytes.Item2));
+
+                    _instanceRegs[destRegister] = returnType.Name;
+                }
+            }
+
+            return writer.Result;
+        }
+
+        private TypeNode[] GetTypesFromArgs(IList<ExprNode> args, int line, int col)
+        {
+            List<TypeNode> argTypes = new();
+            foreach (ExprNode arg in args)
+            {
+                TypeNode? argType = _semantic.ExprTypes[arg];
+                if (argType == null)
+                    throw new CodeGeneratorException(
+                        "Argument cannot be of type 'void'.",
+                        line, col
+                    );
+                argTypes.Add(argType);
+            }
+            return argTypes.ToArray();
         }
 
         protected CodeWriter.CodeResult GeneratePushInstance(PushInstanceNode pushInstance, byte destRegister)
@@ -1030,13 +1071,23 @@ namespace Mint.CodeGenerators
 
         protected byte GetOpcode(string name) => OpcodeHelper.OpcodeByName[Version][name];
 
-        protected bool DoesFunctionReturn(string fullName, IList<TypeNode> paramTypes)
+        protected bool DoesFunctionReturn(string fullName, IList<TypeNode> paramTypes, [NotNullWhen(true)] out TypeNode? returnType)
         {
             bool isReturn = false;
+            TypeNode? type = null;
             GetFuncSymbol(fullName, paramTypes)?.Switch(
-                objFunc => isReturn = objFunc.ReturnType != null,
-                xrefFunc => isReturn = xrefFunc.ReturnType != null
+                objFunc =>
+                {
+                    isReturn = objFunc.ReturnType != null;
+                    type = objFunc.ReturnType;
+                },
+                xrefFunc =>
+                {
+                    isReturn = xrefFunc.ReturnType != null;
+                    type = xrefFunc.ReturnType;
+                }
             );
+            returnType = type;
             return isReturn;
         }
 

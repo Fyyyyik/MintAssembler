@@ -1,5 +1,6 @@
 ﻿using Mint.AstNodes;
 using Mint.Util;
+using System.Runtime.CompilerServices;
 
 namespace Mint.Semantics
 {
@@ -162,13 +163,12 @@ namespace Mint.Semantics
                         break;
                     }
 
-                    CheckReferenceAssign(varDecl.Type, initType);
-
-                    if (!TypesMatch(varDecl.Type, initType))
-                        AddError(
-                            $"Cannot assign '{initType?.Name}' to variable of type '{varDecl.Type.Name}'",
-                            varDecl
-                        );
+                    if (!CheckReferenceAssign(varDecl.Type, initType))
+                        if (!TypesMatch(varDecl.Type, initType))
+                            AddError(
+                                $"Cannot assign '{initType?.Name}' to variable of type '{varDecl.Type.Name}'",
+                                varDecl
+                            );
 
                     _scopeStack.Define(varDecl.Name, varDecl.Type);
                     break;
@@ -192,12 +192,13 @@ namespace Mint.Semantics
                         AddError("Cannot assign 'void' to assignable.", assign);
                         break;
                     }
-                    CheckReferenceAssign(targetType, assignType);
                     if (targetType.IsConst)
                     {
                         AddError("Assignment to a constant value isn't allowed.", assign);
                         break;
                     }
+                    if (CheckReferenceAssign(targetType, assignType))
+                        break;
                     if (!TypesMatch(assignType, targetType))
                         AddError(
                             $"Cannot assign '{assignType?.Name}' to variable of type '{targetType?.Name}'",
@@ -406,7 +407,7 @@ namespace Mint.Semantics
                 return null;
             }
 
-            TypeNode type = new(_currentClass.FullName, true, false, ts.Line, ts.Column);
+            TypeNode type = new(_currentClass.FullName, true, true, ts.Line, ts.Column);
             _exprTypes[ts] = type;
             return type;
         }
@@ -512,10 +513,6 @@ namespace Mint.Semantics
                     _exprTypes[memberCall] = funcSbl.ReturnType;
                     return funcSbl.ReturnType;
                 }
-
-                AddError($"Object '{obj.FullName}' does not have a function with the name '{memberCall.Name}'.", memberCall);
-                _exprTypes[memberCall] = null;
-                return null;
             }
 
             if (_module.XRefObjects.TryGetValue(exprType.Name, out XRefSymbol? xrefObj))
@@ -526,10 +523,6 @@ namespace Mint.Semantics
                     _exprTypes[memberCall] = xrefFunc.ReturnType;
                     return xrefFunc.ReturnType;
                 }
-
-                AddError($"XRef object '{xrefObj.FullName}' does not have a function with the name '{memberCall.Name}'.", memberCall);
-                _exprTypes[memberCall] = null;
-                return null;
             }
 
             AddError($"'{exprType.Name}' is not a known object. Did you forget to reference it with the 'xref' keyword ?", memberCall);
@@ -658,9 +651,7 @@ namespace Mint.Semantics
         private static bool TypesMatch(TypeNode? a,  TypeNode? b)
         {
             if (a == null || b == null) return false;
-            return (a.Name == b.Name && a.IsArray == b.IsArray && a.IsRef == b.IsRef) ||
-                   (a.IsRef && !b.IsRef && b.Name == "int") ||
-                   (b.IsRef && !a.IsRef && a.Name == "int");
+            return a.Name == b.Name && a.IsArray == b.IsArray && a.IsRef == b.IsRef;
         }
 
         private void AddError(string message, AstNode node)
@@ -670,11 +661,17 @@ namespace Mint.Semantics
 
         private string GetFullObjectName(string objName) => $"{NameOperations.GetParent(_module.Name)}.{objName}";
 
-        private void CheckReferenceAssign(TypeNode targetType, TypeNode valueType)
+        // Special exceptions related to assigning references
+        private bool CheckReferenceAssign(TypeNode targetType, TypeNode valueType)
         {
-            if (targetType.IsRef && !valueType.IsRef && valueType.Name != "int")
-                AddError("The target for the assignment is a reference and thus must be assigned another reference. " +
-                    "You can also reinterpret an 'int' as a pointer.", targetType);
+            if (targetType.IsRef && !valueType.IsRef && valueType.Name == "int")
+                return true;
+
+            // automatic reinterpretation to ref
+            if (targetType.IsRef && !valueType.IsRef && IsObject(valueType.Name))
+                return true;
+
+            return false;
         }
     }
 }

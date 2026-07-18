@@ -23,6 +23,9 @@
     <None Update="Examples\0.2\Breath.mint">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </None>
+    <None Update="Examples\0.2\GearAnim.mint">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
     <None Update="Examples\0.2\Model.mint">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </None>
