@@ -17,6 +17,9 @@
   </ItemGroup>
 
   <ItemGroup>
+    <None Update="Examples\0.2\0.2.hmint">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
     <None Update="Examples\0.2\0.2.mint">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </None>

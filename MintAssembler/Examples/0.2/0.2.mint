@@ -1,5 +1,7 @@
 module User.Tsuruoka.MintTest;
 
+include "0.2.hmint"; // use slashes '/' to separate directory levels
+
 namespace HEL.Math
 {
 	mint object Vector3
@@ -30,7 +32,6 @@ namespace GObj
 {
 	mint object FootState
 	{
-		bool IsGround();
 		bool IsAir();
 	}
 

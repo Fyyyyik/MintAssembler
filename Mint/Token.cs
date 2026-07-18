@@ -34,6 +34,7 @@ namespace Mint
         Ref,
         Module,
         Do,
+        Include,
 
         // Types, the basic ones (could also be Identifiers, resolve those later)
         Void,

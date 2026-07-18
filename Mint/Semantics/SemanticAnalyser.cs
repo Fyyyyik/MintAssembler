@@ -97,7 +97,16 @@ namespace Mint.Semantics
                                 xrefSbl.Functions.Add(xrefFuncSbl);
                                 break;
                         }
-                    _module.XRefObjects.Add(obj.Name, xrefSbl);
+                    if (_module.XRefObjects.TryGetValue(obj.Name, out XRefSymbol? preXRefSbl))
+                    {
+                        foreach (KeyValuePair<string, VariableSymbol> varSbl in xrefSbl.Variables)
+                            if (!preXRefSbl.Variables.ContainsKey(varSbl.Key))
+                                preXRefSbl.Variables.Add(varSbl.Key, varSbl.Value);
+                        foreach (XRefFunctionSymbol xrefFuncSbl in xrefSbl.Functions)
+                            if (!preXRefSbl.FindFunction(xrefFuncSbl.Name, xrefFuncSbl.ArgumentTypes, out _))
+                                preXRefSbl.Functions.Add(xrefFuncSbl);
+                    }
+                    else _module.XRefObjects.Add(obj.Name, xrefSbl);
                 }
             }
         }

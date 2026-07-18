@@ -1,0 +1,7 @@
+namespace GObj
+{
+	extern object FootState
+	{
+		bool IsGround();
+	}
+}

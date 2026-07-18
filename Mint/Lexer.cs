@@ -44,6 +44,7 @@ namespace Mint
             ["ref"]       = TokenType.Ref,
             ["module"]    = TokenType.Module,
             ["do"]        = TokenType.Do,
+            ["include"]   = TokenType.Include,
             ["true"]      = TokenType.BoolLiteral,
             ["false"]     = TokenType.BoolLiteral
         };

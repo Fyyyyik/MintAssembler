@@ -13,10 +13,19 @@ namespace Mint
         private const string VOID_VARIABLE_MSG = "A variable needs to have a type.";
 
         private readonly List<Token> _tokens;
+        private readonly FileInfo? _file;
+        private readonly bool _isInclude;
         private int _pos;
         private bool _foundThis;
 
-        public Parser(List<Token> tokens) => _tokens = tokens;
+        private static List<string> _includesVisited = new();
+
+        public Parser(List<Token> tokens, FileInfo? file = null, bool isInclude = false)
+        {
+            _tokens = tokens;
+            _file = file;
+            _isInclude = isInclude;
+        }
 
         private (int Line, int Column) CurrentPosition => (Current.Line, Current.Column);
 
@@ -62,9 +71,13 @@ namespace Mint
 
         public ModuleNode Parse()
         {
-            Expect(TokenType.Module);
-            string fullName = ReadFullName();
-            Expect(TokenType.Semicolon);
+            string fullName = "";
+            if (!_isInclude)
+            {
+                Expect(TokenType.Module);
+                fullName = ReadFullName();
+                Expect(TokenType.Semicolon);
+            }
 
             List<ObjectNode> objects = new();
             while (!Check(TokenType.EOF))
@@ -73,6 +86,8 @@ namespace Mint
 
                 if (Check(TokenType.Namespace))
                     objects.AddRange(ParseNamespace());
+                else if (Check(TokenType.Include))
+                    objects.AddRange(ParseInclude());
                 else
                     objects.Add(ParseObject());
             }
@@ -111,6 +126,33 @@ namespace Mint
             return objects;
         }
 
+        private List<ObjectNode> ParseInclude()
+        {
+            var (line, col) = CurrentPosition;
+
+            Expect(TokenType.Include);
+
+            if (_file == null)
+                throw new ParserException("Cannot parse include. No file was provided.", line, col);
+
+            string headerFileName = Expect(TokenType.StringLiteral).Value.Replace('/', '\\');
+            Expect(TokenType.Semicolon);
+            string? moduleDir = Path.GetDirectoryName(_file.FullName);
+            if (moduleDir == null)
+                throw new ParserException("Failed to get the directory containing the module file.", line, col);
+            string headerPath = $"{moduleDir}{Path.DirectorySeparatorChar}{headerFileName}";
+
+            if (_includesVisited.Contains(headerPath))
+                return new(); // we already did this file, leave now before blowing up the program with infinite recursions
+            _includesVisited.Add(headerPath);
+
+            if (!File.Exists(headerPath))
+                throw new ParserException($"Cannot parse include. No file was found at the resolved path '{headerPath}'.", line, col);
+
+            string headerContent = File.ReadAllText(headerPath);
+            return new Parser(new Lexer(headerContent).Tokenize(), new FileInfo(headerPath), true).Parse().Objects;
+        }
+
         private ObjectNode ParseObject()
         {
             var (line, col) = CurrentPosition;
@@ -145,7 +187,11 @@ namespace Mint
 
             string name = string.Empty;
             if (isLoc)
+            {
                 name = Expect(TokenType.Identifier).Value;
+                if (_isInclude)
+                    throw new ParserException($"Object '{name}' from include file '{_file?.FullName}' cannot be set to 'local'.", line, col);
+            }
             else
                 name = ReadFullName();
             Expect(TokenType.OpenBrace);

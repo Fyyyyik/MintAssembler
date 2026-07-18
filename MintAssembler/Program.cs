@@ -102,7 +102,7 @@ namespace MintAssembler
 
             WriteVerbose("All tokens are valid. Building the initial syntax tree...");
 
-            ModuleNode module = new Parser(tokens).Parse();
+            ModuleNode module = new Parser(tokens, options.InputFile).Parse();
 
             if (options.Archives != null)
             {
