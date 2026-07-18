@@ -132,6 +132,9 @@ object TestClass
 		float savedX = *savedXPtr;
 
 		ref float myPtr2 = 0x80005678;
+
+		int castedInt = (int)*myPtr2;
+		float castedFloat = (float)savedX;
 	}
 
 	float GetVec()

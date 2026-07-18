@@ -98,7 +98,18 @@ namespace Mint.CodeGenerators
             if (_currentFunction.ReturnType != null)
                 retTypeName = GetTypeName(_currentFunction.ReturnType);
 
-            string mintName = $"{retTypeName} {AppendParamTypes(funcNode.Name, Utility.ToTypeNodes(_currentFunction.Parameters))}";
+            string funcName = funcNode.Name + '(';
+            TypeNode[] paramTypes = Utility.ToTypeNodes(_currentFunction.Parameters);
+            for (int i = 0; i < paramTypes.Length; i++)
+            {
+                if (i == paramTypes.Length - 1)
+                    funcName += $"{GetTypeName(paramTypes[i])}";
+                else
+                    funcName += $"{GetTypeName(paramTypes[i])},";
+            }
+            funcName += ')';
+
+            string mintName = $"{retTypeName} {funcName}";
             if (funcNode.IsConst)
                 mintName += "const";
             MintFunction mintFunc = new(mintName)
@@ -467,6 +478,7 @@ namespace Mint.CodeGenerators
             ArrayCreationNode ac => GenerateArrayCreation(ac, destRegister),
             IncrementNode inc => GenerateIncrement(inc, destRegister),
             MemberOffsetNode mo => GenerateMemberOffset(mo, destRegister),
+            TypeCastNode tc => GenerateTypeCast(tc, destRegister),
 
             _ => throw new CodeGeneratorException($"Invalid expression node for this version : {expr}", expr.Line, expr.Column)
         };
@@ -1007,6 +1019,46 @@ namespace Mint.CodeGenerators
             return writer.Result;
         }
 
+        protected CodeWriter.CodeResult GenerateTypeCast(TypeCastNode typeCast, byte destRegister)
+        {
+            CodeWriter writer = new();
+
+            byte exprReg = _registers.AllocateRegister();
+            writer.Append(GenerateExpr(typeCast.Expr, exprReg));
+
+            TypeNode? ogType = _semantic.ExprTypes[typeCast.Expr];
+            if (ogType == null)
+                throw new CodeGeneratorException($"Type cast with 'void' expression encountered.", typeCast.Line, typeCast.Column);
+
+            if (ogType.Name == typeCast.Type.Name)
+            {
+                writer.Instructions.Add(new Instruction(GetOpcode("ldsrsr"), destRegister, exprReg));
+
+                _registers.FreeRegister(exprReg);
+                return writer.Result;
+            }
+
+            writer.Instructions.Add(new Instruction(GetOpcode("ldfrsr"), 1, exprReg));
+
+            string castFuncName = ogType.Name switch
+            {
+                "int" when typeCast.Type.Name == "float" => "HEL.Cast.I2F(int)",
+                "float" when typeCast.Type.Name == "int" => "HEL.Cast.F2I(float)",
+
+                _ => throw new CodeGeneratorException(
+                    $"Unknown type cast from '{ogType.Name}' to '{typeCast.Type.Name}'.",
+                    typeCast.Line, typeCast.Column
+                )
+            };
+            ushort v = (ushort)AddOrGetXRef(castFuncName);
+            (byte, byte) vBytes = CodeWriter.ToBytes(v);
+            writer.Instructions.Add(new Instruction(GetOpcode("call"), 0xFF, vBytes.Item1, vBytes.Item2));
+            writer.Instructions.Add(new Instruction(GetOpcode("ldsrfz"), destRegister));
+
+            _registers.FreeRegister(exprReg);
+            return writer.Result;
+        }
+
         protected CodeWriter.CodeResult GenerateMemberSetup(MemberAccessNode member, byte destRegister)
         {
             CodeWriter writer = new();
@@ -1042,18 +1094,6 @@ namespace Mint.CodeGenerators
 
             return writer.Result;
         }
-            /*=> _semantic.ExprTypes[increment.Target]?.Name switch
-        {
-            "int" => [GetOpcode(increment.IsIncrement ? "inci32" : "deci32"), reg, 0xFF, 0xFF],
-            "float" => [GetOpcode(increment.IsIncrement ? "incf32" : "decf32"), reg, 0xFF, 0xFF],
-
-            _ => throw new CodeGeneratorException(
-                $"Cannot increment value of type '{_semantic.ExprTypes[increment.Target]?.Name}'.",
-                increment.Line,
-                increment.Column
-            )
-        };
-            */
 
         // Everything below are various utility functions
 
@@ -1106,11 +1146,20 @@ namespace Mint.CodeGenerators
         protected string AppendParamTypes(string fullName, IList<TypeNode> paramTypes)
         {
             StringBuilder sb = new(fullName);
+
+            TypeNode[]? funcArgTypes = null;
+            GetFuncSymbol(fullName, paramTypes)?.Switch(
+                (funcSbl) => funcArgTypes = Utility.ToTypeNodes(funcSbl.Parameters),
+                (xrefSbl) => funcArgTypes = xrefSbl.ArgumentTypes.ToArray()
+            );
+            if (funcArgTypes == null)
+                throw new CodeGeneratorException($"Could not get parameter types from function symbol with name '{fullName}'.", 0, 0);
+
             sb.Append('(');
-            if (paramTypes.Count > 0)
-                sb.Append(GetTypeName(paramTypes[0]));
-            for (int i = 1; i < paramTypes.Count; i++)
-                sb.Append($",{GetTypeName(paramTypes[i])}");
+            if (funcArgTypes.Length > 0)
+                sb.Append(GetTypeName(funcArgTypes[0]));
+            for (int i = 1; i < funcArgTypes.Length; i++)
+                sb.Append($",{GetTypeName(funcArgTypes[i])}");
             sb.Append(')');
             return sb.ToString();
         }

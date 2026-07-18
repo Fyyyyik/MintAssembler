@@ -171,6 +171,7 @@ namespace Mint.Semantics
             ArrayCreationNode ac => RewriteArrayCreation(ac),
             IncrementNode inc => inc with { Target = RewriteExpression(inc.Target) },
             MemberOffsetNode mo => mo with { Object = RewriteExpression(mo.Object) },
+            TypeCastNode tc => tc with { Expr = RewriteExpression(tc.Expr) },
 
             _ => expr
         };

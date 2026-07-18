@@ -282,6 +282,7 @@ namespace Mint.Semantics
                 ArrayCreationNode ac => ResolveArrayCreationType(ac),
                 IncrementNode inc => ResolveIncrementType(inc),
                 MemberOffsetNode mo => ResolveMemberOffsetType(mo),
+                TypeCastNode tc => ResolveTypeCastType(tc),
 
                 _ => null
             };
@@ -589,6 +590,40 @@ namespace Mint.Semantics
             memberType = memberType with { IsRef = true };
             _exprTypes[memberOffset] = memberType;
             return memberType;
+        }
+
+        private TypeNode? ResolveTypeCastType(TypeCastNode typeCast)
+        {
+            TypeNode? exprType = AnalyseExpr(typeCast.Expr);
+            if (exprType == null)
+            {
+                AddError($"Cannot cast 'void' to type '{typeCast.Type.Name}'.", typeCast);
+                _exprTypes[typeCast] = null;
+                return null;
+            }
+
+            if (exprType.Name == typeCast.Type.Name)
+            {
+                _exprTypes[typeCast] = typeCast.Type;
+                return typeCast.Type;
+            }
+
+            if (!_rules.AllowedCasts.TryGetValue(exprType.Name, out string[]? allowedTypes))
+            {
+                AddError($"Type '{exprType.Name}' cannot be casted to another type.", typeCast);
+                _exprTypes[typeCast] = null;
+                return null;
+            }
+
+            if (!allowedTypes.Contains(typeCast.Type.Name))
+            {
+                AddError($"Type '{exprType.Name}' cannot be casted to type '{typeCast.Type.Name}'.", typeCast);
+                _exprTypes[typeCast] = null;
+                return null;
+            }
+
+            _exprTypes[typeCast] = typeCast.Type;
+            return typeCast.Type;
         }
 
         private TypeNode? ResolveMemberType(TypeNode objType, string member)

@@ -10,6 +10,7 @@ namespace Mint
     {
         public HashSet<TokenType> IllegalTokens { get; init; } = new();
         public HashSet<string> Dereferenceable { get; init; } = new();
+        public Dictionary<string, string[]> AllowedCasts { get; init; } = new();
 
         private bool IsTokenLegal(Token token)
         {
@@ -49,6 +50,11 @@ namespace Mint
                 {
                     "int",
                     "float"
+                },
+                AllowedCasts = new()
+                {
+                    ["int"] = ["float"],
+                    ["float"] = ["int"]
                 }
             },
 

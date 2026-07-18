@@ -870,9 +870,21 @@ namespace Mint
                 return new IdentifierNode(name, line, col);
             }
 
-            // Grouped expression like (x + y)
+            // Grouped expression and casts
             if (Match(TokenType.OpenParen))
             {
+                try
+                {
+                    TypeNode? type = ParseType();
+                    if (type != null)
+                    {
+                        Expect(TokenType.CloseParen);
+                        return new TypeCastNode(type, ParseExpression(), line, col);
+                    }
+                }
+                catch { }
+
+                // probably not a cast then
                 ExprNode expr = ParseExpression();
                 Expect(TokenType.CloseParen);
                 return expr;

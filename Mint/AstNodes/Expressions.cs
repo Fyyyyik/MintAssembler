@@ -52,4 +52,7 @@ namespace Mint.AstNodes
 
     // Getting the offset of a member
     public record MemberOffsetNode(ExprNode Object, string Member, int Line, int Column) : ExprNode(Line, Column);
+
+    // Casts
+    public record TypeCastNode(TypeNode Type, ExprNode Expr, int Line, int Column) : ExprNode(Line, Column);
 }
