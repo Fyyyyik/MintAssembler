@@ -43,7 +43,7 @@ namespace Mint.AstNodes
         int Column
     ) : ExprNode(Line, Column);
     public record NewObjectNode(string ClassName, int Line, int Column) : ExprNode(Line, Column);
-    public record PushInstanceNode(string ObjectName, int Line, int Column) : ExprNode(Line, Column);
+    public record PushInstanceNode(string ObjectName, int Line, int Column, List<ExprNode>? CtArgs = null) : ExprNode(Line, Column);
 
     // size is null if no expression is put between the brackets
     // if there are initializers, figure out the size from that

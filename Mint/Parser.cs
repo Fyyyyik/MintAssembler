@@ -211,6 +211,15 @@ namespace Mint
 
             // TODO for future versions : handle enums
 
+            if (Match(TokenType.This))
+            {
+                // Constructor
+                if (isLocal)
+                    return ParseConstructor(line, col);
+                else
+                    return ParseExternalConstructor(line, col);
+            }
+
             TypeNode? type = ParseType();
             string name = Expect(TokenType.Identifier).Value;
 
@@ -250,6 +259,19 @@ namespace Mint
             bool isConst = Match(TokenType.Const);
             Expect(TokenType.Semicolon);
             return new ExternalFunctionNode(returnType, name, isConst, types, line, col);
+        }
+
+        private ConstructorNode ParseConstructor(int line, int col)
+        {
+            List<ParamNode> parameters = ParseParameterList();
+            return new ConstructorNode(parameters, ParseBlock(), line, col);
+        }
+
+        private ExternalConstructorNode ParseExternalConstructor(int line, int col)
+        {
+            List<TypeNode> types = ParseTypeList();
+            Expect(TokenType.Semicolon);
+            return new ExternalConstructorNode(types, line, col);
         }
 
         private List<ParamNode> ParseParameterList()
@@ -593,34 +615,7 @@ namespace Mint
                                                         or TokenType.DoubleGreaterEquals
                                                         or TokenType.DoubleLessEquals;
 
-        private ExprNode ParseExpression() => ParseEquality();
-
-        private ExprNode ParseEquality()
-        {
-            ExprNode left = ParseComparison();
-            while (Current.Type is TokenType.DoubleEquals or TokenType.NotEqual)
-            {
-                var (line, col) = CurrentPosition;
-                string op = _tokens[_pos++].Value;
-                ExprNode right = ParseComparison();
-                left = new BinaryExprNode(left, op, right, line, col);
-            }
-            return left;
-        }
-
-        private ExprNode ParseComparison()
-        {
-            ExprNode left = ParseLogicalOr();
-            while (Current.Type is TokenType.Greater or TokenType.GreaterEquals
-                                or TokenType.Lesser or TokenType.LesserEquals)
-            {
-                var (line, col) = CurrentPosition;
-                string op = _tokens[_pos++].Value;
-                ExprNode right = ParseLogicalOr();
-                left = new BinaryExprNode(left, op, right, line, col);
-            }
-            return left;
-        }
+        private ExprNode ParseExpression() => ParseLogicalOr();
 
         private ExprNode ParseLogicalOr()
         {
@@ -637,8 +632,35 @@ namespace Mint
 
         private ExprNode ParseLogicalAnd()
         {
-            ExprNode left = ParseOr();
+            ExprNode left = ParseEquality();
             while (Current.Type is TokenType.DoubleAmpersand)
+            {
+                var (line, col) = CurrentPosition;
+                string op = _tokens[_pos++].Value;
+                ExprNode right = ParseEquality();
+                left = new BinaryExprNode(left, op, right, line, col);
+            }
+            return left;
+        }
+
+        private ExprNode ParseEquality()
+        {
+            ExprNode left = ParseComparison();
+            while (Current.Type is TokenType.DoubleEquals or TokenType.NotEqual)
+            {
+                var (line, col) = CurrentPosition;
+                string op = _tokens[_pos++].Value;
+                ExprNode right = ParseComparison();
+                left = new BinaryExprNode(left, op, right, line, col);
+            }
+            return left;
+        }
+
+        private ExprNode ParseComparison()
+        {
+            ExprNode left = ParseOr();
+            while (Current.Type is TokenType.Greater or TokenType.GreaterEquals
+                                or TokenType.Lesser or TokenType.LesserEquals)
             {
                 var (line, col) = CurrentPosition;
                 string op = _tokens[_pos++].Value;

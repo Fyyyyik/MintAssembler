@@ -1,0 +1,95 @@
+namespace GObj
+{
+	extern object Anim
+	{
+		void Start(int, bool, float);
+	}
+	
+	extern object MeshFlip
+	{
+		void Flip(int);
+	}
+
+	extern object Target
+	{
+		float GetSign();
+	}
+}
+
+namespace HEL.Math
+{
+	extern object Direction3
+	{
+		this(const ref Vector3, const ref Vector3, const ref Vector3);
+	}
+
+	extern object Vector3
+	{
+		this(float, float, float);
+	}
+
+	extern object Math
+	{
+		float SinDegF(float);
+		float CosDegF(float);
+	}
+}
+
+namespace Scn.Step
+{
+	namespace Chara
+	{
+		extern object ObjColl
+		{
+			void SetAttackType(int, int);
+			void SetAttackCenter(int, float, float);
+			void AddAttack(int, int, float, float, float);
+		}
+
+		extern object Effect
+		{
+			void RequestN(int, int);
+			void RequestND(int, int, const ref HEL.Math.Direction3, const ref HEL.Math.Vector3);
+			void Release();
+		}
+
+		extern object ModelRotCtrl
+		{
+			void InitRotH(float);
+		}
+	}
+	
+	namespace Hero
+	{
+		extern object Utility
+		{
+			bool IsMeta();
+			bool IsDedede();
+			bool IsDee();
+		}
+
+		extern object ObjColl
+		{
+			void SetBodyCollBig();
+		}
+
+		extern object Invincible
+		{
+			bool IsMighty();
+		}
+
+		extern object Effect
+		{
+			void BindState();
+			void BindState2();
+		}
+	}
+
+	namespace Vacuum
+	{
+		extern object Attacker
+		{
+			int VacuumCount();
+		}
+	}
+}

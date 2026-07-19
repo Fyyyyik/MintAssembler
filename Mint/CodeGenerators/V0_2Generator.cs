@@ -9,6 +9,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices.Marshalling;
 using System.Text;
+using System.Threading.Tasks.Dataflow;
 using System.Xml.Linq;
 
 namespace Mint.CodeGenerators
@@ -237,10 +238,10 @@ namespace Mint.CodeGenerators
             if (targetArray.Array is ArrayCreationNode)
                 writer.Instructions.Add(new Instruction(GetOpcode("arpop"), arrReg));
 
-            _registers.FreeRegister(arrReg);
-            _registers.FreeRegister(cpyReg);
-            _registers.FreeRegister(idxReg);
-            _registers.FreeRegister(valReg);
+            writer.Append(GenerateFreeRegister(arrReg));
+            writer.Append(GenerateFreeRegister(cpyReg));
+            writer.Append(GenerateFreeRegister(idxReg));
+            writer.Append(GenerateFreeRegister(valReg));
 
             return writer.Result;
         }
@@ -261,8 +262,8 @@ namespace Mint.CodeGenerators
             writer.Instructions.Add(new Instruction(GetOpcode("addofs"), objReg, vBytes.Item1, vBytes.Item2));
             writer.Instructions.Add(new Instruction(GetOpcode("stsrsr"), objReg, valReg));
 
-            _registers.FreeRegister(objReg);
-            _registers.FreeRegister(valReg);
+            writer.Append(GenerateFreeRegister(objReg));
+            writer.Append(GenerateFreeRegister(valReg));
             return writer.Result;
         }
 
@@ -277,7 +278,7 @@ namespace Mint.CodeGenerators
             (byte, byte) vBytes = CodeWriter.ToBytes(v);
             writer.Instructions.Add(new Instruction(GetOpcode("stsvsr"), valReg, vBytes.Item1, vBytes.Item2));
 
-            _registers.FreeRegister(valReg);
+            writer.Append(GenerateFreeRegister(valReg));
             return writer.Result;
         }
 
@@ -293,8 +294,8 @@ namespace Mint.CodeGenerators
 
             writer.Instructions.Add(new Instruction(GetOpcode("stsrsr"), refReg, valReg));
 
-            _registers.FreeRegister(valReg);
-            _registers.FreeRegister(refReg);
+            writer.Append(GenerateFreeRegister(valReg));
+            writer.Append(GenerateFreeRegister(refReg));
             return writer.Result;
         }
 
@@ -309,7 +310,7 @@ namespace Mint.CodeGenerators
             Instruction jmpnegInstr = new Instruction(GetOpcode("jmpneg"), condReg); // temporary until v is figured out
             writer.Instructions.Add(jmpnegInstr);
 
-            _registers.FreeRegister(condReg);
+            writer.Append(GenerateFreeRegister(condReg));
 
             CodeWriter.CodeResult thenBlock = GenerateBlock(ifNode.Then);
             writer.Append(thenBlock);
@@ -354,7 +355,8 @@ namespace Mint.CodeGenerators
             int jmpnegInstructionPos = writer.Instructions.Count;
             Instruction jmpnegInstr = new(GetOpcode("jmpneg"), condReg);
             writer.Instructions.Add(jmpnegInstr);
-            _registers.FreeRegister(condReg);
+
+            writer.Append(GenerateFreeRegister(condReg));
 
             CodeWriter.CodeResult whileBody = GenerateBlock(whileNode.Body);
             writer.Append(whileBody);
@@ -381,7 +383,7 @@ namespace Mint.CodeGenerators
             short endJmpLength = (short)(-writer.Instructions.Count);
             (byte, byte) vBytes = CodeWriter.ToBytes(endJmpLength);
             writer.Instructions.Add(new Instruction(GetOpcode("jmppos"), condReg, vBytes.Item1, vBytes.Item2));
-            _registers.FreeRegister(condReg);
+            writer.Append(GenerateFreeRegister(condReg));
 
             return writer.Result;
         }
@@ -399,7 +401,7 @@ namespace Mint.CodeGenerators
             int condJmpPos = writer.Instructions.Count;
             Instruction condJmpInstr = new(GetOpcode("jmpneg"), condReg); // temporary v
             writer.Instructions.Add(condJmpInstr);
-            _registers.FreeRegister(condReg);
+            writer.Append(GenerateFreeRegister(condReg));
 
             CodeWriter.CodeResult bodyBlock = GenerateBlock(forNode.Body);
             writer.Append(bodyBlock);
@@ -430,7 +432,7 @@ namespace Mint.CodeGenerators
                 writer.Instructions.Add(new Instruction(GetOpcode("ldsrsr"), 0, valReg));
                 writer.Instructions.Add(new Instruction(GetOpcode("fret"), 0xFF, 0, 0xFF));
 
-                _registers.FreeRegister(valReg);
+                writer.Append(GenerateFreeRegister(valReg));
             }
             else writer.Instructions.Add(new Instruction(GetOpcode("fleave")));
             
@@ -439,10 +441,11 @@ namespace Mint.CodeGenerators
 
         protected CodeWriter.CodeResult GenerateExprStmt(ExprStmtNode exprStmt)
         {
+            CodeWriter writer = new();
             byte scratch = _registers.AllocateRegister();
-            CodeWriter.CodeResult result = GenerateExpr(exprStmt.Expr, scratch);
-            _registers.FreeRegister(scratch);
-            return result;
+            writer.Append(GenerateExpr(exprStmt.Expr, scratch));
+            writer.Append(GenerateFreeRegister(scratch));
+            return writer.Result;
         }
 
         protected CodeWriter.CodeResult GenerateYield(YieldNode yieldNode)
@@ -454,7 +457,7 @@ namespace Mint.CodeGenerators
 
             writer.Instructions.Add(new Instruction(GetOpcode("yield"), countReg));
 
-            _registers.FreeRegister(countReg);
+            writer.Append(GenerateFreeRegister(countReg));
             return writer.Result;
         }
 
@@ -557,7 +560,7 @@ namespace Mint.CodeGenerators
             writer.Append(GenerateMemberSetup(memberAccess, objReg));
             writer.Instructions.Add(new Instruction(GetOpcode("ldsra4"), destRegister, objReg));
 
-            _registers.FreeRegister(objReg);
+            writer.Append(GenerateFreeRegister(objReg));
             return writer.Result;
         }
 
@@ -578,9 +581,9 @@ namespace Mint.CodeGenerators
             writer.Instructions.Add(new Instruction(GetOpcode("ldsra4"), destRegister, cpyReg));
 
             if (arrayAccess.Array is not ArrayCreationNode)
-                _registers.FreeRegister(arrReg);
-            _registers.FreeRegister(idxReg);
-            _registers.FreeRegister(cpyReg);
+                writer.Append(GenerateFreeRegister(arrReg));
+            writer.Append(GenerateFreeRegister(idxReg));
+            writer.Append(GenerateFreeRegister(cpyReg));
             return writer.Result;
         }
 
@@ -593,7 +596,7 @@ namespace Mint.CodeGenerators
 
             writer.Instructions.Add(new Instruction(GetOpcode("ldsra4"), destRegister, refReg));
 
-            _registers.FreeRegister(refReg);
+            writer.Append(GenerateFreeRegister(refReg));
             return writer.Result;
         }
 
@@ -608,17 +611,55 @@ namespace Mint.CodeGenerators
         {
             CodeWriter writer = new();
 
+            byte leftReg = _registers.AllocateRegister();
+            writer.Append(GenerateExpr(binaryExpr.Left, leftReg));
+
+            byte rightReg;
+            if (binaryExpr.Op is "&&" or "||")
+            {
+                // there is no logical 'and' and 'or' opcode in mint so gotta do it the nasty way
+
+                byte jmpOpcode = GetOpcode(binaryExpr.Op == "&&" ? "jmpneg" : "jmppos");
+
+                Instruction jmpLeft = new(jmpOpcode, leftReg);
+                int jmpLeftIdx = writer.Instructions.Count;
+                writer.Instructions.Add(jmpLeft);
+
+                writer.Append(GenerateFreeRegister(leftReg));
+
+                rightReg = _registers.AllocateRegister();
+                writer.Append(GenerateExpr(binaryExpr.Right, rightReg));
+
+                Instruction jmpRight = new(jmpOpcode, rightReg);
+                int jmpRightIdx = writer.Instructions.Count;
+                writer.Instructions.Add(jmpRight);
+
+                writer.Append(GenerateFreeRegister(rightReg));
+
+                writer.Instructions.Add(new Instruction(GetOpcode(binaryExpr.Op == "&&" ? "ldsrbt" : "ldsrzr"), destRegister));
+                writer.Instructions.Add(new Instruction(GetOpcode("jmp"), 0xFF, 0, 2));
+
+                short jmpLeftV = (short)(writer.Instructions.Count - jmpLeftIdx);
+                (byte, byte) vBytes = CodeWriter.ToBytes(jmpLeftV);
+                writer.Instructions[jmpLeftIdx] = jmpLeft with { X = vBytes.Item1, Y = vBytes.Item2 };
+
+                short jmpRightV = (short)(writer.Instructions.Count - jmpRightIdx);
+                vBytes = CodeWriter.ToBytes(jmpRightV);
+                writer.Instructions[jmpRightIdx] = jmpRight with { X = vBytes.Item1, Y = vBytes.Item2 };
+
+                writer.Instructions.Add(new Instruction(GetOpcode(binaryExpr.Op == "&&" ? "ldsrzr" : "ldsrbt"), destRegister));
+
+                return writer.Result;
+            }
+
+            rightReg = _registers.AllocateRegister();
+            writer.Append(GenerateExpr(binaryExpr.Right, rightReg));
+
             TypeNode? binType = _semantic.ExprTypes[binaryExpr];
             TypeNode? leftType = _semantic.ExprTypes[binaryExpr.Left];
             TypeNode? rightType = _semantic.ExprTypes[binaryExpr.Right];
             if (binType == null || leftType == null || rightType == null)
                 throw new CodeGeneratorException("Cannot have a binary expression with type 'void'.", binaryExpr.Line, binaryExpr.Column);
-
-            byte leftReg = _registers.AllocateRegister();
-            writer.Append(GenerateExpr(binaryExpr.Left, leftReg));
-
-            byte rightReg = _registers.AllocateRegister();
-            writer.Append(GenerateExpr(binaryExpr.Right, rightReg));
 
             string opcode = binaryExpr.Op switch
             {
@@ -662,8 +703,8 @@ namespace Mint.CodeGenerators
                 invertOperands ? rightReg : leftReg,
                 invertOperands ? leftReg : rightReg
             ));
-            _registers.FreeRegister(leftReg);
-            _registers.FreeRegister(rightReg);
+            writer.Append(GenerateFreeRegister(leftReg));
+            writer.Append(GenerateFreeRegister(rightReg));
             return writer.Result;
         }
 
@@ -693,7 +734,7 @@ namespace Mint.CodeGenerators
 
             writer.Instructions.Add(new Instruction(GetOpcode(opcode), destRegister, operandReg));
 
-            _registers.FreeRegister(operandReg);
+            writer.Append(GenerateFreeRegister(operandReg));
             return writer.Result;
         }
 
@@ -723,7 +764,7 @@ namespace Mint.CodeGenerators
                 writer.Instructions.Add(new Instruction(GetOpcode("ldsrfz"), destRegister));
 
             foreach (byte reg in regs)
-                _registers.FreeRegister(reg);
+                writer.Append(GenerateFreeRegister(reg));
             return writer.Result;
         }
 
@@ -773,9 +814,9 @@ namespace Mint.CodeGenerators
             if (isReturn)
                 writer.Instructions.Add(new Instruction(GetOpcode("ldsrfz"), destRegister));
 
-            _registers.FreeRegister(objReg);
+            writer.Append(GenerateFreeRegister(objReg));
             foreach (byte reg in regs)
-                _registers.FreeRegister(reg);
+                writer.Append(GenerateFreeRegister(reg));
             return writer.Result;
         }
 
@@ -838,8 +879,46 @@ namespace Mint.CodeGenerators
 
             CodeWriter writer = new();
             writer.Instructions.Add(new Instruction(GetOpcode("sppshz"), destRegister, vBytes.Item1, vBytes.Item2));
-
             _instanceRegs.Add(destRegister, pushInstance.ObjectName);
+
+            if (pushInstance.CtArgs != null)
+            {
+                List<byte> regs = new();
+                foreach (ExprNode arg in pushInstance.CtArgs)
+                {
+                    regs.Add(_registers.AllocateRegister());
+                    writer.Append(GenerateExpr(arg, regs[^1]));
+                }
+
+                writer.Instructions.Add(new Instruction(GetOpcode("ldfrsr"), 0, destRegister));
+                for (int i = 0; i < regs.Count; i++)
+                    writer.Instructions.Add(new Instruction(GetOpcode("ldfrsr"), (byte)(i + 1), regs[i]));
+
+                TypeNode[] argTypes = GetTypesFromArgs(pushInstance.CtArgs, pushInstance.Line, pushInstance.Column);
+                if (_semantic.Module.LocalObjects.TryGetValue(pushInstance.ObjectName, out ObjectSymbol? objSbl))
+                    if (objSbl.FindConstructor(argTypes, out ConstructorSymbol? ctSbl))
+                        argTypes = Utility.ToTypeNodes(ctSbl.Parameters);
+                if (_semantic.Module.XRefObjects.TryGetValue(pushInstance.ObjectName, out XRefSymbol? xrefSbl))
+                    if (xrefSbl.FindConstructor(argTypes, out XRefConstructorSymbol? xrefCtSbl))
+                        argTypes = xrefCtSbl.ArgumentTypes.ToArray();
+
+                StringBuilder sb = new($"{pushInstance.ObjectName}.this(");
+                for (int i = 0; i < argTypes.Length; i++)
+                {
+                    sb.Append(GetTypeName(argTypes[i]));
+                    if (i != argTypes.Length - 1)
+                        sb.Append(',');
+                }
+                sb.Append(')');
+
+                v = (ushort)AddOrGetXRef(sb.ToString());
+                vBytes = CodeWriter.ToBytes(v);
+                writer.Instructions.Add(new Instruction(GetOpcode("call"), 0xFF, vBytes.Item1, vBytes.Item2));
+
+                foreach (byte reg in regs)
+                    writer.Append(GenerateFreeRegister(reg));
+            }
+
             return writer.Result;
         }
 
@@ -881,9 +960,9 @@ namespace Mint.CodeGenerators
                     writer.Instructions.Add(new Instruction(GetOpcode("stsrsr"), cpyReg, initReg));
                     writer.Instructions.Add(new Instruction(GetOpcode("inci32"), idxReg));
                 }
-                _registers.FreeRegister(initReg);
-                _registers.FreeRegister(idxReg);
-                _registers.FreeRegister(cpyReg);
+                writer.Append(GenerateFreeRegister(initReg));
+                writer.Append(GenerateFreeRegister(idxReg));
+                writer.Append(GenerateFreeRegister(cpyReg));
             }
 
             _arrayRegs.Add(destRegister);
@@ -933,7 +1012,7 @@ namespace Mint.CodeGenerators
             (byte, byte) vBytes = CodeWriter.ToBytes(v);
             writer.Instructions.Add(new Instruction(GetOpcode("stsvsr"), valReg, vBytes.Item1, vBytes.Item2));
 
-            _registers.FreeRegister(valReg);
+            writer.Append(GenerateFreeRegister(valReg));
             return writer.Result;
         }
 
@@ -951,8 +1030,8 @@ namespace Mint.CodeGenerators
 
             writer.Instructions.Add(new Instruction(GetOpcode("stsrsr"), objReg, valReg));
 
-            _registers.FreeRegister(valReg);
-            _registers.FreeRegister(objReg);
+            writer.Append(GenerateFreeRegister(valReg));
+            writer.Append(GenerateFreeRegister(objReg));
             return writer.Result;
         }
 
@@ -978,10 +1057,10 @@ namespace Mint.CodeGenerators
             writer.Instructions.Add(new Instruction(GetOpcode("stsrsr"), cpyReg, valReg));
 
             if (array.Array is not ArrayCreationNode)
-                _registers.FreeRegister(arrReg);
-            _registers.FreeRegister(valReg);
-            _registers.FreeRegister(idxReg);
-            _registers.FreeRegister(cpyReg);
+                writer.Append(GenerateFreeRegister(arrReg));
+            writer.Append(GenerateFreeRegister(valReg));
+            writer.Append(GenerateFreeRegister(idxReg));
+            writer.Append(GenerateFreeRegister(cpyReg));
             return writer.Result;
         }
 
@@ -999,8 +1078,8 @@ namespace Mint.CodeGenerators
 
             writer.Instructions.Add(new Instruction(GetOpcode("stsrsr"), refReg, valReg));
 
-            _registers.FreeRegister(refReg);
-            _registers.FreeRegister(valReg);
+            writer.Append(GenerateFreeRegister(refReg));
+            writer.Append(GenerateFreeRegister(valReg));
             return writer.Result;
         }
 
@@ -1015,7 +1094,7 @@ namespace Mint.CodeGenerators
             (byte, byte) vBytes = CodeWriter.ToBytes(v);
             writer.Instructions.Add(new Instruction(GetOpcode("addofs"), destRegister, vBytes.Item1, vBytes.Item2));
 
-            _registers.FreeRegister(objReg);
+            writer.Append(GenerateFreeRegister(objReg));
             return writer.Result;
         }
 
@@ -1034,7 +1113,7 @@ namespace Mint.CodeGenerators
             {
                 writer.Instructions.Add(new Instruction(GetOpcode("ldsrsr"), destRegister, exprReg));
 
-                _registers.FreeRegister(exprReg);
+                writer.Append(GenerateFreeRegister(exprReg));
                 return writer.Result;
             }
 
@@ -1055,7 +1134,7 @@ namespace Mint.CodeGenerators
             writer.Instructions.Add(new Instruction(GetOpcode("call"), 0xFF, vBytes.Item1, vBytes.Item2));
             writer.Instructions.Add(new Instruction(GetOpcode("ldsrfz"), destRegister));
 
-            _registers.FreeRegister(exprReg);
+            writer.Append(GenerateFreeRegister(exprReg));
             return writer.Result;
         }
 
@@ -1162,6 +1241,31 @@ namespace Mint.CodeGenerators
                 sb.Append($",{GetTypeName(funcArgTypes[i])}");
             sb.Append(')');
             return sb.ToString();
+        }
+
+        protected CodeWriter.CodeResult GenerateFreeRegister(byte reg)
+        {
+            CodeWriter writer = new();
+
+            if (_instanceRegs.TryGetValue(reg, out string? xref))
+            {
+                ushort v = (ushort)AddOrGetXRef(xref);
+                (byte, byte) vBytes = CodeWriter.ToBytes(v);
+                writer.Instructions.Add(new Instruction(GetOpcode("sppop"), reg, vBytes.Item1, vBytes.Item2));
+
+                _instanceRegs.Remove(reg);
+            }
+
+            if (_arrayRegs.Contains(reg))
+            {
+                writer.Instructions.Add(new Instruction(GetOpcode("arpop"), reg));
+
+                _arrayRegs.Remove(reg);
+            }
+
+            _registers.FreeRegister(reg);
+
+            return writer.Result;
         }
 
         protected static bool AreBothType(TypeNode a, TypeNode b, string type) => a.Name == type && b.Name == type;

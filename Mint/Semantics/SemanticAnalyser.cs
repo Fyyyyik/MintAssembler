@@ -67,6 +67,11 @@ namespace Mint.Semantics
                                 funcSbl.Parameters.AddRange(funcNode.Params);
                                 objSbl.Functions.Add(funcSbl);
                                 break;
+                            case ConstructorNode ctNode:
+                                ConstructorSymbol ctSbl = new();
+                                ctSbl.Parameters.AddRange(ctNode.Params);
+                                objSbl.Constructors.Add(ctSbl);
+                                break;
                         }
                     _module.LocalObjects.Add(obj.Name, objSbl);
                 }
@@ -96,6 +101,11 @@ namespace Mint.Semantics
                                 xrefFuncSbl.ArgumentTypes.AddRange(xrefFuncNode.ParamTypes);
                                 xrefSbl.Functions.Add(xrefFuncSbl);
                                 break;
+                            case ExternalConstructorNode xrefCtNode:
+                                XRefConstructorSymbol xrefCtSbl = new();
+                                xrefCtSbl.ArgumentTypes.AddRange(xrefCtNode.ParamTypes);
+                                xrefSbl.Constructors.Add(xrefCtSbl);
+                                break;
                         }
                     if (_module.XRefObjects.TryGetValue(obj.Name, out XRefSymbol? preXRefSbl))
                     {
@@ -105,6 +115,9 @@ namespace Mint.Semantics
                         foreach (XRefFunctionSymbol xrefFuncSbl in xrefSbl.Functions)
                             if (!preXRefSbl.FindFunction(xrefFuncSbl.Name, xrefFuncSbl.ArgumentTypes, out _))
                                 preXRefSbl.Functions.Add(xrefFuncSbl);
+                        foreach (XRefConstructorSymbol xrefCtSbl in xrefSbl.Constructors)
+                            if (!preXRefSbl.FindConstructor(xrefCtSbl.ArgumentTypes, out _))
+                                preXRefSbl.Constructors.Add(xrefCtSbl);
                     }
                     else _module.XRefObjects.Add(obj.Name, xrefSbl);
                 }
@@ -551,6 +564,20 @@ namespace Mint.Semantics
         {
             TypeNode type = new(pushInstance.ObjectName, true, true, pushInstance.Line, pushInstance.Column);
             _exprTypes[pushInstance] = type;
+
+            if (pushInstance.CtArgs == null)
+                return type;
+
+            List<TypeNode> argTypes = ResolveCallArgs(pushInstance.CtArgs, pushInstance);
+
+            if (_module.LocalObjects.TryGetValue(pushInstance.ObjectName, out ObjectSymbol? objSbl))
+                if (objSbl.FindConstructor(argTypes, out _))
+                    return type;
+            if (_module.XRefObjects.TryGetValue(pushInstance.ObjectName, out XRefSymbol? xrefSbl))
+                if (xrefSbl.FindConstructor(argTypes, out _))
+                    return type;
+
+            AddError($"'{type.Name}' has no constructor with the specified parameter types.", pushInstance);
             return type;
         }
 

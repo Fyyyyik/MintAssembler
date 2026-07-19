@@ -15,6 +15,7 @@ namespace Mint.Semantics
         public required string FullName;
         public Dictionary<string, VariableSymbol> Variables { get; } = new();
         public List<FunctionSymbol> Functions { get; } = new(); // overloads exists, so no dictionnary
+        public List<ConstructorSymbol> Constructors { get; } = new();
 
         public bool FindFunction(string name, IList<TypeNode> parameterTypes, [NotNullWhen(true)] out FunctionSymbol? funcSbl)
         {
@@ -41,6 +42,29 @@ namespace Mint.Semantics
             funcSbl = null;
             return false;
         }
+
+        public bool FindConstructor(IList<TypeNode> parameterTypes, [NotNullWhen(true)] out ConstructorSymbol? ctSbl)
+        {
+            foreach (ConstructorSymbol ct in Constructors)
+            {
+                if (ct.Parameters.Count != parameterTypes.Count)
+                    continue;
+                bool sameParams = true;
+                for (int i = 0; i < parameterTypes.Count; i++)
+                    if (parameterTypes[i].Name != ct.Parameters[i].Type.Name)
+                    {
+                        sameParams = false;
+                        break;
+                    }
+                if (sameParams)
+                {
+                    ctSbl = ct;
+                    return true;
+                }
+            }
+            ctSbl = null;
+            return false;
+        }
     }
 
     // Like a class, but not from the module.
@@ -49,6 +73,7 @@ namespace Mint.Semantics
         public required string FullName;
         public Dictionary<string, VariableSymbol> Variables { get; } = new();
         public List<XRefFunctionSymbol> Functions { get; } = new();
+        public List<XRefConstructorSymbol> Constructors { get; } = new();
 
         public bool FindFunction(string name, IList<TypeNode> parameterTypes, [NotNullWhen(true)] out XRefFunctionSymbol? funcSbl)
         {
@@ -75,6 +100,29 @@ namespace Mint.Semantics
             funcSbl = null;
             return false;
         }
+
+        public bool FindConstructor(IList<TypeNode> parameterTypes, [NotNullWhen(true)] out XRefConstructorSymbol? ctSbl)
+        {
+            foreach (XRefConstructorSymbol ct in Constructors)
+            {
+                if (ct.ArgumentTypes.Count != parameterTypes.Count)
+                    continue;
+                bool sameParams = true;
+                for (int i = 0; i < parameterTypes.Count; i++)
+                    if (parameterTypes[i].Name != ct.ArgumentTypes[i].Name)
+                    {
+                        sameParams = false;
+                        break;
+                    }
+                if (sameParams)
+                {
+                    ctSbl = ct;
+                    return true;
+                }
+            }
+            ctSbl = null;
+            return false;
+        }
     }
 
     // Used for local and external references since external vars don't have different info
@@ -91,6 +139,11 @@ namespace Mint.Semantics
         public required bool HasThis { get; init; }
         public List<ParamNode> Parameters { get; } = new();
     }
+
+    public record ConstructorSymbol
+    {
+        public List<ParamNode> Parameters { get; } = new();
+    }
     
     /*
     An external function doesn't have a body, and we only care about the types of
@@ -100,6 +153,11 @@ namespace Mint.Semantics
     {
         public required string Name { get; init; }
         public required TypeNode? ReturnType { get; init; } = null;
+        public List<TypeNode> ArgumentTypes { get; } = new();
+    }
+
+    public record XRefConstructorSymbol
+    {
         public List<TypeNode> ArgumentTypes { get; } = new();
     }
 }

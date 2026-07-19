@@ -1,7 +1,9 @@
 ﻿using Mint.AstNodes;
 using Mint.Util;
+using OneOf;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Text;
 
 namespace Mint.Semantics
@@ -48,7 +50,9 @@ namespace Mint.Semantics
         {
             VariableNode var => var with { Type = RewriteType(var.Type) },
             FunctionNode func => RewriteFunction(func),
+            ConstructorNode ct => RewriteConstructor(ct),
             ExternalFunctionNode xrefFunc => RewriteExternalFunction(xrefFunc),
+            ExternalConstructorNode xct => RewriteExternalConstructor(xct),
 
             _ => member
         };
@@ -95,6 +99,32 @@ namespace Mint.Semantics
                 rewritten = rewritten with { ReturnType = RewriteType(rewritten.ReturnType) };
 
             return rewritten;
+        }
+
+        private ConstructorNode RewriteConstructor(ConstructorNode constructor)
+        {
+            _scope.PushScope();
+
+            List<ParamNode> rewrittenParams = new();
+            foreach (ParamNode param in constructor.Params)
+            {
+                rewrittenParams.Add(param with { Type = RewriteType(param.Type) });
+                _scope.Define(param.Name, param.Type);
+            }
+
+            ConstructorNode rewritten = constructor with { Body = RewriteBlock(constructor.Body), Params = rewrittenParams };
+
+            _scope.PopScope();
+            return rewritten;
+        }
+
+        private ExternalConstructorNode RewriteExternalConstructor(ExternalConstructorNode constructor)
+        {
+            List<TypeNode> rewrittenParamTypes = new();
+            foreach (TypeNode type in constructor.ParamTypes)
+                rewrittenParamTypes.Add(RewriteType(type));
+
+            return constructor with { ParamTypes = rewrittenParamTypes };
         }
 
         private BlockNode RewriteBlock(BlockNode block)
@@ -168,6 +198,7 @@ namespace Mint.Semantics
             UnaryExprNode ue => ue with { Operand = RewriteExpression(ue.Operand) },
             QualifiedCallNode qc => RewriteQualifiedCall(qc),
             MemberCallNode mc => RewriteMemberCall(mc),
+            PushInstanceNode pi => RewritePushInstance(pi),
             ArrayCreationNode ac => RewriteArrayCreation(ac),
             IncrementNode inc => inc with { Target = RewriteExpression(inc.Target) },
             MemberOffsetNode mo => mo with { Object = RewriteExpression(mo.Object) },
@@ -234,6 +265,11 @@ namespace Mint.Semantics
             foreach (ExprNode arg in qc.Args)
                 rewrittenArgs.Add(RewriteExpression(arg));
 
+            if (IsNeighborObject(qc.FullName))
+                return new PushInstanceNode($"{NameOperations.GetParent(_moduleSymbols.Name)}.{qc.FullName}", qc.Line, qc.Column, rewrittenArgs);
+            if (IsKnownObject(qc.FullName))
+                return new PushInstanceNode(qc.FullName, qc.Line, qc.Column, rewrittenArgs);
+
             string[] names = qc.FullName.Split('.');
 
             if (IsLocalVariable(names[0]))
@@ -266,6 +302,18 @@ namespace Mint.Semantics
             foreach (ExprNode arg in mc.Args)
                 rewrittenArgs.Add(RewriteExpression(arg));
             return mc with { Args = rewrittenArgs, Object = RewriteExpression(mc.Object) };
+        }
+
+        private ExprNode RewritePushInstance(PushInstanceNode pi)
+        {
+            List<ExprNode>? rewrittenArgs = null;
+            if (pi.CtArgs != null)
+            {
+                rewrittenArgs = new();
+                foreach (ExprNode arg in pi.CtArgs)
+                    rewrittenArgs.Add(RewriteExpression(arg));
+            }
+            return pi with { CtArgs = rewrittenArgs };
         }
 
         private ExprNode RewriteArrayCreation(ArrayCreationNode ac)

@@ -24,6 +24,8 @@ namespace Mint.AstNodes
         int Column
     ) : MemberNode(Line, Column);
 
+    public record ConstructorNode(List<ParamNode> Params, BlockNode Body, int Line, int Column) : MemberNode(Line, Column);
+
     public record ParamNode(TypeNode Type, string Name, int Line, int Column) : AstNode(Line, Column);
 
     public record ExternalFunctionNode(
@@ -55,4 +57,6 @@ namespace Mint.AstNodes
             return sb.ToString();
         }
     }
+
+    public record ExternalConstructorNode(List<TypeNode> ParamTypes, int Line, int Column) : MemberNode(Line, Column);
 }
