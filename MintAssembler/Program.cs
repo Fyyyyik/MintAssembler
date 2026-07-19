@@ -32,7 +32,7 @@ namespace MintAssembler
             {
                 Description = "Show more info."
             };
-            Option<string> outputPath = new("--output", ["-o"])
+            Option<FileInfo> outputPath = new("--output", ["-o"])
             {
                 Description = "Specify where the compiled binary should be created. If the path points to a Mint archive the module will be added to it."
             };
@@ -66,7 +66,7 @@ namespace MintAssembler
                     InputFile = file,
                     Version = ver,
                     IsVerbose = result.GetValue(verbose),
-                    OutputPath = result.GetValue(outputPath),
+                    Output = result.GetValue(outputPath),
                     Archives = result.GetValue(archives)
                 };
                 Compile(options);
@@ -195,15 +195,43 @@ namespace MintAssembler
 
             ModuleRtDL compiled = new V0_2Generator(result).GenerateRtDL(rewritten);
 
-            string output = options.OutputPath == null ?
-                $"{Directory.GetCurrentDirectory()}{Path.DirectorySeparatorChar}{compiled.Name}.bin" :
-                options.OutputPath;
+            if (options.Output != null && options.Output.Exists)
+            {
+                WriteVerbose($"Path '{options.Output}' points to a file. Replacing the module in the Mint archive...");
 
-            WriteVerbose($"Finished generating the Mint module!\nSaving it to '{output}'...");
+                if (options.Version == "0.2")
+                {
+                    ArchiveRtDL outArchive;
+                    using (FileStream stream = new FileStream(options.Output.FullName, FileMode.Open, FileAccess.Read))
+                    using (EndianBinaryReader reader = new(stream))
+                        outArchive = new(reader);
 
-            using (FileStream stream = new(output, FileMode.Create, FileAccess.Write))
-            using (EndianBinaryWriter writer = new(stream))
-                compiled.Write(writer);
+                    if (outArchive.ModuleExists(compiled.Name))
+                    {
+                        ModuleRtDL ogModule = outArchive.GetModule(compiled.Name);
+                        outArchive.Modules.Remove(ogModule);
+                    }
+                    outArchive.Modules.Add(compiled);
+
+                    using (FileStream stream1 = new(options.Output.FullName, FileMode.Open, FileAccess.Write))
+                    using (EndianBinaryWriter writer = new(stream1))
+                        outArchive.Write(writer);
+                }
+
+                WriteVerbose("Replaced!");
+            }
+            else
+            {
+                string output = options.Output == null ?
+                    $"{Directory.GetCurrentDirectory()}{Path.DirectorySeparatorChar}{compiled.Name}.bin" :
+                    options.Output.FullName;
+
+                WriteVerbose($"Finished generating the Mint module!\nSaving it to '{output}'...");
+
+                using (FileStream stream = new(output, FileMode.Create, FileAccess.Write))
+                using (EndianBinaryWriter writer = new(stream))
+                    compiled.Write(writer);
+            }
 
             WriteVerbose("Finished writing.\nThe compiler is finished.");
         }
