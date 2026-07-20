@@ -44,7 +44,16 @@ namespace Mint
                     TokenType.Double,
                     TokenType.Char,
                     TokenType.WString,
-                    TokenType.Register
+                    TokenType.Register,
+
+                    TokenType.Class,
+                    TokenType.Enum,
+                    TokenType.Interface,
+                    TokenType.Pod,
+                    TokenType.Rawptr,
+                    TokenType.Struct,
+                    TokenType.Unknown7,
+                    TokenType.Utility
                 },
                 Dereferenceable = new()
                 {
@@ -57,6 +66,16 @@ namespace Mint
                     ["float"] = ["int"]
                 }
             },
+
+            /*
+            "1.0.5" => new VersionRules()
+            {
+                IllegalTokens = new()
+                {
+                    TokenType.Object
+                }
+            },
+            */
 
             _ => throw new NotImplementedException($"Cannot get rules for version {version}")
         };

@@ -12,6 +12,14 @@ namespace Mint
         private static readonly Dictionary<string, TokenType> Keywords = new()
         {
             ["object"]    = TokenType.Object,
+            ["class"]     = TokenType.Class,
+            ["enum"]      = TokenType.Enum,
+            ["interface"] = TokenType.Interface,
+            ["pod"]       = TokenType.Pod,
+            ["rawptr"]    = TokenType.Rawptr,
+            ["struct"]    = TokenType.Struct,
+            ["unknown7"]  = TokenType.Unknown7,
+            ["utility"]   = TokenType.Utility,
             ["new"]       = TokenType.New,
             ["return"]    = TokenType.Return,
             ["if"]        = TokenType.If,
