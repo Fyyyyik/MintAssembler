@@ -8,9 +8,12 @@ namespace Mint
 {
     public class VersionRules
     {
+        public string Version { get; }
         public HashSet<TokenType> IllegalTokens { get; init; } = new();
         public HashSet<string> Dereferenceable { get; init; } = new();
         public Dictionary<string, string[]> AllowedCasts { get; init; } = new();
+
+        public VersionRules(string version) => Version = version;
 
         private bool IsTokenLegal(Token token)
         {
@@ -30,7 +33,7 @@ namespace Mint
 
         public static VersionRules GetRules(string version) => version switch
         {
-            "0.2" => new VersionRules()
+            "0.2" => new VersionRules(version)
             {
                 IllegalTokens = new()
                 {
@@ -68,7 +71,7 @@ namespace Mint
             },
 
             /*
-            "1.0.5" => new VersionRules()
+            "1.0.5" => new VersionRules(version)
             {
                 IllegalTokens = new()
                 {
