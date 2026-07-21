@@ -1,4 +1,5 @@
-﻿using System;
+﻿using KirbyLib.Mint;
+using System;
 using System.Collections.Generic;
 using System.Text;
 
@@ -17,6 +18,7 @@ namespace Mint.AstNodes
         string Name, // full name with namespaces for xrefs
         List<MemberNode> Members,
         ObjectLocation Location,
+        ObjectType ObjType,
         int Line,
         int Column
     ) : AstNode(Line, Column);

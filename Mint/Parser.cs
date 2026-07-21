@@ -1,4 +1,5 @@
 ﻿using Mint.AstNodes;
+using KirbyLib.Mint;
 using System;
 using System.Collections.Generic;
 using System.Reflection.Metadata.Ecma335;
@@ -173,16 +174,11 @@ namespace Mint
                     loc = ObjectLocation.Extern;
                     _pos++;
                     break;
-                default:
-                    if (!IsObjectToken)
-                        throw new ParserException($"Unknown object location token : '{Current.Type}'.", line, col);
-                    break;
             }
             bool isLoc = loc == ObjectLocation.Local;
 
             (line, col) = CurrentPosition;
-            if (!IsObjectToken)
-                throw new ParserException($"Expected an object type but got '{Current.Type}'.", line, col);
+            ObjectType type = CurrentObjectType;
             _pos++;
 
             string name = string.Empty;
@@ -202,8 +198,23 @@ namespace Mint
 
             Expect(TokenType.CloseBrace);
 
-            return new ObjectNode(name, members, loc, line, col);
+            return new ObjectNode(name, members, loc, type, line, col);
         }
+
+        private ObjectType CurrentObjectType => Current.Type switch
+        {
+            TokenType.Object => ObjectType.Invalid, // we don't care about the obj type in 0.2
+            TokenType.Class => ObjectType.Class,
+            TokenType.Enum => ObjectType.Enum,
+            TokenType.Interface => ObjectType.Interface,
+            TokenType.Pod => ObjectType.Pod,
+            TokenType.Rawptr => ObjectType.Rawptr,
+            TokenType.Struct => ObjectType.Struct,
+            TokenType.Unknown7 => ObjectType.Unknown_7,
+            TokenType.Utility => ObjectType.Utility,
+
+            _ => throw new ParserException($"Expected an object type but got '{Current.Type}'.", CurrentPosition.Line, CurrentPosition.Column)
+        };
 
         private MemberNode ParseMember(bool isLocal)
         {
