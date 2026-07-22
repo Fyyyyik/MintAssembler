@@ -65,7 +65,7 @@ namespace Mint.CodeGenerators
                 switch (member)
                 {
                     case VariableNode varNode:
-                        mintObj.Variables.Add(new MintVariable(varNode.Type.Name, varNode.Name));
+                        mintObj.Variables.Add(new MintVariable(varNode.Type.GetTypeName(), varNode.Name));
                         break;
                     case FunctionNode funcNode:
                         mintObj.Functions.Add(GenerateFunction(funcNode));
@@ -97,16 +97,16 @@ namespace Mint.CodeGenerators
 
             string retTypeName = "void";
             if (_currentFunction.ReturnType != null)
-                retTypeName = GetTypeName(_currentFunction.ReturnType);
+                retTypeName = _currentFunction.ReturnType.GetTypeName();
 
             string funcName = funcNode.Name + '(';
-            TypeNode[] paramTypes = Utility.ToTypeNodes(_currentFunction.Parameters);
+            ITypeNode[] paramTypes = Utility.ToTypeNodes(_currentFunction.Parameters);
             for (int i = 0; i < paramTypes.Length; i++)
             {
                 if (i == paramTypes.Length - 1)
-                    funcName += $"{GetTypeName(paramTypes[i])}";
+                    funcName += $"{paramTypes[i].GetTypeName()}";
                 else
-                    funcName += $"{GetTypeName(paramTypes[i])},";
+                    funcName += $"{paramTypes[i].GetTypeName()},";
             }
             funcName += ')';
 
@@ -200,7 +200,20 @@ namespace Mint.CodeGenerators
         protected CodeWriter.CodeResult GenerateVarDecl(VarDeclNode varDecl)
         {
             byte destReg = _registers.AllocateRegister(varDecl.Name);
-            return GenerateExpr(varDecl.Initializer, destReg);
+
+            CodeWriter writer = new();
+            if (varDecl.Initializer != null)
+                writer.Append(GenerateExpr(varDecl.Initializer, destReg));
+            else if (varDecl.Type.IsArray())
+            {
+                // No initializer but we gotta make the array
+                int size = varDecl.Type.GetArraySize();
+                writer.Append(GenerateIntLiteral(new IntLiteralNode(size, varDecl.Line, varDecl.Column), destReg));
+                writer.Instructions.Add(new Instruction(GetOpcode("arpshz"), destReg));
+                _arrayRegs.Add(destReg);
+            }
+
+            return writer.Result;
         }
 
         // TODO : override in 7.X (no more mint array)
@@ -235,7 +248,7 @@ namespace Mint.CodeGenerators
             writer.Instructions.Add(new Instruction(GetOpcode("arirx"), cpyReg, idxReg));
             writer.Instructions.Add(new Instruction(GetOpcode("stsrsr"), cpyReg, valReg));
 
-            if (targetArray.Array is ArrayCreationNode)
+            if (targetArray.Array is ArrayInitNode)
                 writer.Instructions.Add(new Instruction(GetOpcode("arpop"), arrReg));
 
             writer.Append(GenerateFreeRegister(arrReg));
@@ -256,7 +269,7 @@ namespace Mint.CodeGenerators
             byte valReg = _registers.AllocateRegister();
             writer.Append(GenerateExpr(assign.Value, valReg));
 
-            string xref = $"{_semantic.ExprTypes[targetMember.Object]?.Name}.{targetMember.Member}";
+            string xref = $"{_semantic.ExprTypes[targetMember.Object]?.GetBaseType().Name}.{targetMember.Member}";
             ushort v = (ushort)AddOrGetXRef(xref);
             (byte, byte) vBytes = CodeWriter.ToBytes(v);
             writer.Instructions.Add(new Instruction(GetOpcode("addofs"), objReg, vBytes.Item1, vBytes.Item2));
@@ -478,7 +491,7 @@ namespace Mint.CodeGenerators
             QualifiedCallNode qc => GenerateQualifiedCall(qc, destRegister),
             MemberCallNode mc => GenerateMemberCall(mc, destRegister),
             PushInstanceNode pi => GeneratePushInstance(pi, destRegister),
-            ArrayCreationNode ac => GenerateArrayCreation(ac, destRegister),
+            ArrayInitNode ai => GenerateArrayInit(ai, destRegister),
             IncrementNode inc => GenerateIncrement(inc, destRegister),
             MemberOffsetNode mo => GenerateMemberOffset(mo, destRegister),
             TypeCastNode tc => GenerateTypeCast(tc, destRegister),
@@ -580,7 +593,7 @@ namespace Mint.CodeGenerators
             writer.Instructions.Add(new Instruction(GetOpcode("arirx"), cpyReg, idxReg));
             writer.Instructions.Add(new Instruction(GetOpcode("ldsra4"), destRegister, cpyReg));
 
-            if (arrayAccess.Array is not ArrayCreationNode)
+            if (arrayAccess.Array is not ArrayInitNode)
                 writer.Append(GenerateFreeRegister(arrReg));
             writer.Append(GenerateFreeRegister(idxReg));
             writer.Append(GenerateFreeRegister(cpyReg));
@@ -655,10 +668,9 @@ namespace Mint.CodeGenerators
             rightReg = _registers.AllocateRegister();
             writer.Append(GenerateExpr(binaryExpr.Right, rightReg));
 
-            TypeNode? binType = _semantic.ExprTypes[binaryExpr];
-            TypeNode? leftType = _semantic.ExprTypes[binaryExpr.Left];
-            TypeNode? rightType = _semantic.ExprTypes[binaryExpr.Right];
-            if (binType == null || leftType == null || rightType == null)
+            ITypeNode? leftType = _semantic.ExprTypes[binaryExpr.Left];
+            ITypeNode? rightType = _semantic.ExprTypes[binaryExpr.Right];
+            if (leftType == null || rightType == null)
                 throw new CodeGeneratorException("Cannot have a binary expression with type 'void'.", binaryExpr.Line, binaryExpr.Column);
 
             string opcode = binaryExpr.Op switch
@@ -712,7 +724,7 @@ namespace Mint.CodeGenerators
         {
             CodeWriter writer = new();
 
-            TypeNode? operandType = _semantic.ExprTypes[unaryExpr.Operand];
+            ITypeNode? operandType = _semantic.ExprTypes[unaryExpr.Operand];
             if (operandType == null)
                 throw new CodeGeneratorException(
                     "Operand must not be of type 'void' for unary expression.",
@@ -723,11 +735,12 @@ namespace Mint.CodeGenerators
             byte operandReg = _registers.AllocateRegister();
             writer.Append(GenerateExpr(unaryExpr.Operand, operandReg));
 
+            TypeNode baseType = operandType.GetBaseType();
             string opcode = unaryExpr.Op switch
             {
-                "-" when operandType.Name == "int" => "negs32",
-                "-" when operandType.Name == "float" => "negf32",
-                "!" when operandType.Name == "bool" => "ntbool",
+                "-" when baseType.Name == "int" => "negs32",
+                "-" when baseType.Name == "float" => "negf32",
+                "!" when baseType.Name == "bool" => "ntbool",
 
                 _ => throw new CodeGeneratorException($"Unknown unary operation with operator '{unaryExpr.Op}'.", unaryExpr.Line, unaryExpr.Column)
             };
@@ -742,7 +755,7 @@ namespace Mint.CodeGenerators
         {
             CodeWriter writer = new();
 
-            TypeNode[] argTypes = GetTypesFromArgs(qualifiedCall.Args, qualifiedCall.Line, qualifiedCall.Column);
+            ITypeNode[] argTypes = GetTypesFromArgs(qualifiedCall.Args, qualifiedCall.Line, qualifiedCall.Column);
 
             writer.Append(TryGenerateReturnInstanceSetup(qualifiedCall.FullName, argTypes, destRegister, out bool isReturn));
 
@@ -772,9 +785,9 @@ namespace Mint.CodeGenerators
         {
             CodeWriter writer = new();
 
-            TypeNode[] argTypes = GetTypesFromArgs(memberCall.Args, memberCall.Line, memberCall.Column);
+            ITypeNode[] argTypes = GetTypesFromArgs(memberCall.Args, memberCall.Line, memberCall.Column);
 
-            TypeNode? objType = _semantic.ExprTypes[memberCall.Object];
+            ITypeNode? objType = _semantic.ExprTypes[memberCall.Object];
             if (objType == null)
                 throw new CodeGeneratorException(
                     "Cannot call from object of type 'void'.",
@@ -782,7 +795,7 @@ namespace Mint.CodeGenerators
                     memberCall.Column
                 );
 
-            string fullName = $"{objType.Name}.{memberCall.Name}";
+            string fullName = $"{objType.GetBaseType().Name}.{memberCall.Name}";
             writer.Append(TryGenerateReturnInstanceSetup(fullName, argTypes, destRegister, out bool isReturn));
 
             byte objReg = _registers.AllocateRegister();
@@ -822,20 +835,21 @@ namespace Mint.CodeGenerators
 
         private CodeWriter.CodeResult TryGenerateReturnInstanceSetup(
             string funcName,
-            IList<TypeNode> argTypes,
+            IList<ITypeNode> argTypes,
             byte destRegister,
             out bool isReturn)
         {
             CodeWriter writer = new();
 
             isReturn = false;
-            if (DoesFunctionReturn(funcName, argTypes, out TypeNode? returnType))
+            if (DoesFunctionReturn(funcName, argTypes, out ITypeNode? returnType))
             {
                 isReturn = true;
-                if (_semantic.Module.LocalObjects.ContainsKey(returnType.Name) ||
-                    _semantic.Module.XRefObjects.ContainsKey(returnType.Name))
+                TypeNode returnBaseType = returnType.GetBaseType();
+                if (_semantic.Module.LocalObjects.ContainsKey(returnBaseType.Name) ||
+                    _semantic.Module.XRefObjects.ContainsKey(returnBaseType.Name))
                 {
-                    if (_instanceRegs.TryGetValue(destRegister, out string? instName) && instName != returnType.Name)
+                    if (_instanceRegs.TryGetValue(destRegister, out string? instName) && instName != returnBaseType.Name)
                     {
                         // register has the wrong instance pushed, pop it
                         ushort popV = (ushort)AddOrGetXRef(instName);
@@ -845,23 +859,23 @@ namespace Mint.CodeGenerators
                     else if (instName != null)
                         return writer.Result; // register already has the correct instance pushed
 
-                    ushort spV = (ushort)AddOrGetXRef(returnType.Name);
+                    ushort spV = (ushort)AddOrGetXRef(returnBaseType.Name);
                     (byte, byte) spVBytes = CodeWriter.ToBytes(spV);
                     writer.Instructions.Add(new Instruction(GetOpcode("sppsh"), destRegister, spVBytes.Item1, spVBytes.Item2));
 
-                    _instanceRegs[destRegister] = returnType.Name;
+                    _instanceRegs[destRegister] = returnBaseType.Name;
                 }
             }
 
             return writer.Result;
         }
 
-        private TypeNode[] GetTypesFromArgs(IList<ExprNode> args, int line, int col)
+        private ITypeNode[] GetTypesFromArgs(IList<ExprNode> args, int line, int col)
         {
-            List<TypeNode> argTypes = new();
+            List<ITypeNode> argTypes = new();
             foreach (ExprNode arg in args)
             {
-                TypeNode? argType = _semantic.ExprTypes[arg];
+                ITypeNode? argType = _semantic.ExprTypes[arg];
                 if (argType == null)
                     throw new CodeGeneratorException(
                         "Argument cannot be of type 'void'.",
@@ -894,7 +908,7 @@ namespace Mint.CodeGenerators
                 for (int i = 0; i < regs.Count; i++)
                     writer.Instructions.Add(new Instruction(GetOpcode("ldfrsr"), (byte)(i + 1), regs[i]));
 
-                TypeNode[] argTypes = GetTypesFromArgs(pushInstance.CtArgs, pushInstance.Line, pushInstance.Column);
+                ITypeNode[] argTypes = GetTypesFromArgs(pushInstance.CtArgs, pushInstance.Line, pushInstance.Column);
                 if (_semantic.Module.LocalObjects.TryGetValue(pushInstance.ObjectName, out ObjectSymbol? objSbl))
                     if (objSbl.FindConstructor(argTypes, out ConstructorSymbol? ctSbl))
                         argTypes = Utility.ToTypeNodes(ctSbl.Parameters);
@@ -905,7 +919,7 @@ namespace Mint.CodeGenerators
                 StringBuilder sb = new($"{pushInstance.ObjectName}.this(");
                 for (int i = 0; i < argTypes.Length; i++)
                 {
-                    sb.Append(GetTypeName(argTypes[i]));
+                    sb.Append(argTypes[i].GetTypeName());
                     if (i != argTypes.Length - 1)
                         sb.Append(',');
                 }
@@ -922,39 +936,31 @@ namespace Mint.CodeGenerators
             return writer.Result;
         }
 
-        protected CodeWriter.CodeResult GenerateArrayCreation(ArrayCreationNode arrayCreation, byte destRegister)
+        protected CodeWriter.CodeResult GenerateArrayInit(ArrayInitNode arrayInit, byte destRegister)
         {
             CodeWriter writer = new();
 
-            if (arrayCreation.Size != null)
-                writer.Append(GenerateExpr(arrayCreation.Size, destRegister));
-            else if (arrayCreation.Initializers != null)
-                writer.Append(GenerateIntLiteral(new IntLiteralNode(
-                    arrayCreation.Initializers.Count,
-                    arrayCreation.Line,
-                    arrayCreation.Column
-                ), destRegister));
-            else
-                // nothing that could indicate size given... welp guess you're getting an array with 0 elements!
-                writer.Append(GenerateIntLiteral(new IntLiteralNode(
-                    0,
-                    arrayCreation.Line,
-                    arrayCreation.Column
-                ), destRegister));
+            writer.Append(GenerateIntLiteral(new IntLiteralNode(
+                arrayInit.Initializers.Count,
+                arrayInit.Line,
+                arrayInit.Column
+            ), destRegister));
             writer.Instructions.Add(new Instruction(GetOpcode("arpshz"), destRegister));
-            if (arrayCreation.Initializers != null) // yes I'm checking that 2 times fight me
+            _arrayRegs.Add(destRegister);
+
+            if (arrayInit.Initializers.Count > 0)
             {
                 byte initReg = _registers.AllocateRegister();
                 byte idxReg = _registers.AllocateRegister();
                 writer.Append(GenerateIntLiteral(new IntLiteralNode(
                     0,
-                    arrayCreation.Line,
-                    arrayCreation.Column
+                    arrayInit.Line,
+                    arrayInit.Column
                 ), idxReg));
                 byte cpyReg = _registers.AllocateRegister();
-                for (int i = 0; i < arrayCreation.Initializers.Count; i++)
+                for (int i = 0; i < arrayInit.Initializers.Count; i++)
                 {
-                    writer.Append(GenerateExpr(arrayCreation.Initializers[i], initReg));
+                    writer.Append(GenerateExpr(arrayInit.Initializers[i], initReg));
                     writer.Instructions.Add(new Instruction(GetOpcode("ldsrsr"), cpyReg, destRegister));
                     writer.Instructions.Add(new Instruction(GetOpcode("arirx"), cpyReg, idxReg));
                     writer.Instructions.Add(new Instruction(GetOpcode("stsrsr"), cpyReg, initReg));
@@ -965,7 +971,6 @@ namespace Mint.CodeGenerators
                 writer.Append(GenerateFreeRegister(cpyReg));
             }
 
-            _arrayRegs.Add(destRegister);
             return writer.Result;
         }
 
@@ -1056,7 +1061,7 @@ namespace Mint.CodeGenerators
             writer.Instructions.Add(new Instruction(GetOpcode("arirx"), cpyReg, idxReg));
             writer.Instructions.Add(new Instruction(GetOpcode("stsrsr"), cpyReg, valReg));
 
-            if (array.Array is not ArrayCreationNode)
+            if (array.Array is not ArrayInitNode)
                 writer.Append(GenerateFreeRegister(arrReg));
             writer.Append(GenerateFreeRegister(valReg));
             writer.Append(GenerateFreeRegister(idxReg));
@@ -1090,7 +1095,7 @@ namespace Mint.CodeGenerators
             byte objReg = _registers.AllocateRegister();
             writer.Append(GenerateExpr(memberOffset.Object, objReg));
 
-            ushort v = (ushort)AddOrGetXRef($"{_semantic.ExprTypes[memberOffset.Object]?.Name}.{memberOffset.Member}");
+            ushort v = (ushort)AddOrGetXRef($"{_semantic.ExprTypes[memberOffset.Object]?.GetBaseType().Name}.{memberOffset.Member}");
             (byte, byte) vBytes = CodeWriter.ToBytes(v);
             writer.Instructions.Add(new Instruction(GetOpcode("addofs"), destRegister, vBytes.Item1, vBytes.Item2));
 
@@ -1105,11 +1110,11 @@ namespace Mint.CodeGenerators
             byte exprReg = _registers.AllocateRegister();
             writer.Append(GenerateExpr(typeCast.Expr, exprReg));
 
-            TypeNode? ogType = _semantic.ExprTypes[typeCast.Expr];
+            TypeNode? ogType = _semantic.ExprTypes[typeCast.Expr]?.GetBaseType();
             if (ogType == null)
                 throw new CodeGeneratorException($"Type cast with 'void' expression encountered.", typeCast.Line, typeCast.Column);
 
-            if (ogType.Name == typeCast.Type.Name)
+            if (ogType.Name == typeCast.Type)
             {
                 writer.Instructions.Add(new Instruction(GetOpcode("ldsrsr"), destRegister, exprReg));
 
@@ -1121,11 +1126,11 @@ namespace Mint.CodeGenerators
 
             string castFuncName = ogType.Name switch
             {
-                "int" when typeCast.Type.Name == "float" => "HEL.Cast.I2F(int)",
-                "float" when typeCast.Type.Name == "int" => "HEL.Cast.F2I(float)",
+                "int" when typeCast.Type == "float" => "HEL.Cast.I2F(int)",
+                "float" when typeCast.Type == "int" => "HEL.Cast.F2I(float)",
 
                 _ => throw new CodeGeneratorException(
-                    $"Unknown type cast from '{ogType.Name}' to '{typeCast.Type.Name}'.",
+                    $"Unknown type cast from '{ogType.Name}' to '{typeCast.Type}'.",
                     typeCast.Line, typeCast.Column
                 )
             };
@@ -1144,7 +1149,7 @@ namespace Mint.CodeGenerators
 
             writer.Append(GenerateExpr(member.Object, destRegister));
 
-            ushort v = (ushort)AddOrGetXRef($"{_semantic.ExprTypes[member.Object]?.Name}.{member.Member}");
+            ushort v = (ushort)AddOrGetXRef($"{_semantic.ExprTypes[member.Object]?.GetBaseType().Name}.{member.Member}");
             (byte, byte) vBytes = CodeWriter.ToBytes(v);
             writer.Instructions.Add(new Instruction(GetOpcode("addofs"), destRegister, vBytes.Item1, vBytes.Item2));
 
@@ -1155,7 +1160,7 @@ namespace Mint.CodeGenerators
         {
             CodeWriter writer = new();
 
-            switch (_semantic.ExprTypes[increment.Target]?.Name)
+            switch (_semantic.ExprTypes[increment.Target]?.GetBaseType().Name)
             {
                 case "int":
                     writer.Instructions.Add(new Instruction(GetOpcode(increment.IsIncrement ? "inci32" : "deci32"), reg));
@@ -1165,7 +1170,7 @@ namespace Mint.CodeGenerators
                     break;
                 default:
                     throw new CodeGeneratorException(
-                        $"Cannot increment value of type '{_semantic.ExprTypes[increment.Target]?.Name}'.",
+                        $"Cannot increment value of type '{_semantic.ExprTypes[increment.Target]?.GetTypeName()}'.",
                         increment.Line,
                         increment.Column
                     );
@@ -1190,10 +1195,10 @@ namespace Mint.CodeGenerators
 
         protected byte GetOpcode(string name) => OpcodeHelper.OpcodeByName[Version][name];
 
-        protected bool DoesFunctionReturn(string fullName, IList<TypeNode> paramTypes, [NotNullWhen(true)] out TypeNode? returnType)
+        protected bool DoesFunctionReturn(string fullName, IList<ITypeNode> paramTypes, [NotNullWhen(true)] out ITypeNode? returnType)
         {
             bool isReturn = false;
-            TypeNode? type = null;
+            ITypeNode? type = null;
             GetFuncSymbol(fullName, paramTypes)?.Switch(
                 objFunc =>
                 {
@@ -1210,7 +1215,7 @@ namespace Mint.CodeGenerators
             return isReturn;
         }
 
-        protected OneOf<FunctionSymbol, XRefFunctionSymbol>? GetFuncSymbol(string fullName, IList<TypeNode> paramTypes)
+        protected OneOf<FunctionSymbol, XRefFunctionSymbol>? GetFuncSymbol(string fullName, IList<ITypeNode> paramTypes)
         {
             string[] names = fullName.Split('.');
             if (_semantic.Module.LocalObjects.TryGetValue(names[^2], out ObjectSymbol? objSbl))
@@ -1222,11 +1227,11 @@ namespace Mint.CodeGenerators
             return null;
         }
 
-        protected string AppendParamTypes(string fullName, IList<TypeNode> paramTypes)
+        protected string AppendParamTypes(string fullName, IList<ITypeNode> paramTypes)
         {
             StringBuilder sb = new(fullName);
 
-            TypeNode[]? funcArgTypes = null;
+            ITypeNode[]? funcArgTypes = null;
             GetFuncSymbol(fullName, paramTypes)?.Switch(
                 (funcSbl) => funcArgTypes = Utility.ToTypeNodes(funcSbl.Parameters),
                 (xrefSbl) => funcArgTypes = xrefSbl.ArgumentTypes.ToArray()
@@ -1236,9 +1241,9 @@ namespace Mint.CodeGenerators
 
             sb.Append('(');
             if (funcArgTypes.Length > 0)
-                sb.Append(GetTypeName(funcArgTypes[0]));
+                sb.Append(funcArgTypes[0].GetTypeName());
             for (int i = 1; i < funcArgTypes.Length; i++)
-                sb.Append($",{GetTypeName(funcArgTypes[i])}");
+                sb.Append($",{funcArgTypes[i].GetTypeName()}");
             sb.Append(')');
             return sb.ToString();
         }
@@ -1268,7 +1273,7 @@ namespace Mint.CodeGenerators
             return writer.Result;
         }
 
-        protected static bool AreBothType(TypeNode a, TypeNode b, string type) => a.Name == type && b.Name == type;
+        protected static bool AreBothType(ITypeNode a, ITypeNode b, string type) => a.GetBaseType().Name == type && b.GetBaseType().Name == type;
 
         private static byte[] GetBytesFromInt(int bits)
         {
@@ -1278,16 +1283,6 @@ namespace Mint.CodeGenerators
                 (byte)((bits >> 8) & 0xFF),
                 (byte)(bits & 0xFF)
             ];
-        }
-
-        private static string GetTypeName(TypeNode type)
-        {
-            string name = type.Name;
-            if (type.IsRef)
-                name = "ref " + name;
-            if (type.IsConst)
-                name = "const " + name;
-            return name;
         }
     }
 }

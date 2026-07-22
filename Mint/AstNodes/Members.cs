@@ -7,14 +7,14 @@ namespace Mint.AstNodes
     public abstract record MemberNode(int Line, int Column) : AstNode(Line, Column);
 
     public record VariableNode(
-        TypeNode Type,
+        ITypeNode Type,
         string Name,
         int Line,
         int Column
     ) : MemberNode(Line, Column);
 
     public record FunctionNode(
-        TypeNode? ReturnType,
+        ITypeNode? ReturnType,
         string Name,
         bool IsConst,
         List<ParamNode> Params,
@@ -26,15 +26,15 @@ namespace Mint.AstNodes
 
     public record ConstructorNode(List<ParamNode> Params, BlockNode Body, int Line, int Column) : MemberNode(Line, Column);
 
-    public record ParamNode(TypeNode Type, string Name, int Line, int Column) : AstNode(Line, Column);
+    public record ParamNode(ITypeNode Type, string Name, int Line, int Column) : AstNode(Line, Column);
 
     public record ExternalFunctionNode(
-        TypeNode? ReturnType,
+        ITypeNode? ReturnType,
         string Name,
         bool IsConst,
         // A list of type instead of Params since here we only care
         // about what type goes where. Also in mint, params have no name.
-        List<TypeNode> ParamTypes,
+        List<ITypeNode> ParamTypes,
         int Line,
         int Column
     ) : MemberNode(Line, Column)
@@ -44,11 +44,7 @@ namespace Mint.AstNodes
             StringBuilder sb = new($"{Name}(");
             for (int i = 0; i < ParamTypes.Count; i++)
             {
-                if (ParamTypes[i].IsConst)
-                    sb.Append("const ");
-                if (ParamTypes[i].IsRef)
-                    sb.Append("ref ");
-                sb.Append(ParamTypes[i].Name);
+                sb.Append(ParamTypes[i].GetTypeName());
 
                 if (i != ParamTypes.Count - 1)
                     sb.Append(',');
@@ -58,5 +54,5 @@ namespace Mint.AstNodes
         }
     }
 
-    public record ExternalConstructorNode(List<TypeNode> ParamTypes, int Line, int Column) : MemberNode(Line, Column);
+    public record ExternalConstructorNode(List<ITypeNode> ParamTypes, int Line, int Column) : MemberNode(Line, Column);
 }

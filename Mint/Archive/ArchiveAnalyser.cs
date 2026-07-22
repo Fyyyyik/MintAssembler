@@ -44,7 +44,7 @@ namespace Mint.Archive
             ObjectNode? objNode;
             if (!TryGetObjectNode(obj, out objNode))
             {
-                objNode = new(obj.Name, new List<MemberNode>(), ObjectLocation.Mint, 0, 0);
+                objNode = new(obj.Name, new List<MemberNode>(), ObjectLocation.Mint, obj.Type, 0, 0);
                 _moduleNode.Objects.Add(objNode);
             }
 
@@ -59,7 +59,7 @@ namespace Mint.Archive
                     }
                 if (exists) continue; // trust the user, then the archive
 
-                TypeNode? type = AnalyseType(mintVar.Type);
+                ITypeNode? type = AnalyseType(mintVar.Type);
                 if (type == null)
                     throw new ArchiveException($"Variable {mintVar.Name} doesn't have a type ('void') in Mint object {obj.Name}.");
                 objNode.Members.Add(new VariableNode(type, mintVar.Name, 0, 0));
@@ -76,12 +76,12 @@ namespace Mint.Archive
                     }
                 if (exists) continue;
 
-                List<TypeNode> paramTypes = new();
+                List<ITypeNode> paramTypes = new();
                 string[] arguments = mintFunc.Name[(mintFunc.Name.LastIndexOf('(') + 1)..mintFunc.Name.LastIndexOf(')')].Split(',');
                 if (arguments.Length == 1 && arguments[0] == "") arguments = Array.Empty<string>();
                 foreach (string arg in arguments)
                 {
-                    TypeNode? argType = AnalyseType(arg);
+                    ITypeNode? argType = AnalyseType(arg);
                     if (argType == null)
                         throw new ArchiveException($"Argument of function {mintFunc.GetShortName()} cannot be 'void'.");
                     paramTypes.Add(argType);
@@ -97,7 +97,7 @@ namespace Mint.Archive
             }
         }
 
-        private static TypeNode? AnalyseType(string type)
+        private static ITypeNode? AnalyseType(string type)
         {
             List<Token> tokens = new Lexer(type).Tokenize();
             return new Parser(tokens).ParseType();

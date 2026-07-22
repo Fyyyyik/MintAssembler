@@ -17,7 +17,7 @@ namespace Mint.Semantics
         public List<FunctionSymbol> Functions { get; } = new(); // overloads exists, so no dictionnary
         public List<ConstructorSymbol> Constructors { get; } = new();
 
-        public bool FindFunction(string name, IList<TypeNode> parameterTypes, [NotNullWhen(true)] out FunctionSymbol? funcSbl)
+        public bool FindFunction(string name, IList<ITypeNode> parameterTypes, [NotNullWhen(true)] out FunctionSymbol? funcSbl)
         {
             foreach (FunctionSymbol func in Functions)
             {
@@ -27,7 +27,7 @@ namespace Mint.Semantics
                         continue;
                     bool sameParams = true;
                     for (int i = 0; i < parameterTypes.Count; i++)
-                        if (parameterTypes[i].Name != func.Parameters[i].Type.Name)
+                        if (parameterTypes[i].GetBaseType().Name != func.Parameters[i].Type.GetBaseType().Name)
                         {
                             sameParams = false;
                             break;
@@ -43,7 +43,7 @@ namespace Mint.Semantics
             return false;
         }
 
-        public bool FindConstructor(IList<TypeNode> parameterTypes, [NotNullWhen(true)] out ConstructorSymbol? ctSbl)
+        public bool FindConstructor(IList<ITypeNode> parameterTypes, [NotNullWhen(true)] out ConstructorSymbol? ctSbl)
         {
             foreach (ConstructorSymbol ct in Constructors)
             {
@@ -51,7 +51,7 @@ namespace Mint.Semantics
                     continue;
                 bool sameParams = true;
                 for (int i = 0; i < parameterTypes.Count; i++)
-                    if (parameterTypes[i].Name != ct.Parameters[i].Type.Name)
+                    if (parameterTypes[i].GetBaseType().Name != ct.Parameters[i].Type.GetBaseType().Name)
                     {
                         sameParams = false;
                         break;
@@ -75,7 +75,7 @@ namespace Mint.Semantics
         public List<XRefFunctionSymbol> Functions { get; } = new();
         public List<XRefConstructorSymbol> Constructors { get; } = new();
 
-        public bool FindFunction(string name, IList<TypeNode> parameterTypes, [NotNullWhen(true)] out XRefFunctionSymbol? funcSbl)
+        public bool FindFunction(string name, IList<ITypeNode> parameterTypes, [NotNullWhen(true)] out XRefFunctionSymbol? funcSbl)
         {
             foreach (XRefFunctionSymbol func in Functions)
             {
@@ -85,7 +85,7 @@ namespace Mint.Semantics
                         continue;
                     bool sameTypes = true;
                     for (int i = 0; i < parameterTypes.Count; i++)
-                        if (parameterTypes[i].Name != func.ArgumentTypes[i].Name)
+                        if (parameterTypes[i].GetBaseType().Name != func.ArgumentTypes[i].GetBaseType().Name)
                         {
                             sameTypes = false;
                             break;
@@ -101,7 +101,7 @@ namespace Mint.Semantics
             return false;
         }
 
-        public bool FindConstructor(IList<TypeNode> parameterTypes, [NotNullWhen(true)] out XRefConstructorSymbol? ctSbl)
+        public bool FindConstructor(IList<ITypeNode> parameterTypes, [NotNullWhen(true)] out XRefConstructorSymbol? ctSbl)
         {
             foreach (XRefConstructorSymbol ct in Constructors)
             {
@@ -109,7 +109,7 @@ namespace Mint.Semantics
                     continue;
                 bool sameParams = true;
                 for (int i = 0; i < parameterTypes.Count; i++)
-                    if (parameterTypes[i].Name != ct.ArgumentTypes[i].Name)
+                    if (parameterTypes[i].GetBaseType().Name != ct.ArgumentTypes[i].GetBaseType().Name)
                     {
                         sameParams = false;
                         break;
@@ -129,13 +129,13 @@ namespace Mint.Semantics
     public record VariableSymbol
     {
         public required string Name { get; init; }
-        public required TypeNode Type { get; init; }
+        public required ITypeNode Type { get; init; }
     }
 
     public record FunctionSymbol
     {
         public required string Name { get; init; }
-        public required TypeNode? ReturnType { get; init; }
+        public required ITypeNode? ReturnType { get; init; }
         public required bool HasThis { get; init; }
         public List<ParamNode> Parameters { get; } = new();
     }
@@ -152,12 +152,12 @@ namespace Mint.Semantics
     public record XRefFunctionSymbol
     {
         public required string Name { get; init; }
-        public required TypeNode? ReturnType { get; init; } = null;
-        public List<TypeNode> ArgumentTypes { get; } = new();
+        public required ITypeNode? ReturnType { get; init; } = null;
+        public List<ITypeNode> ArgumentTypes { get; } = new();
     }
 
     public record XRefConstructorSymbol
     {
-        public List<TypeNode> ArgumentTypes { get; } = new();
+        public List<ITypeNode> ArgumentTypes { get; } = new();
     }
 }

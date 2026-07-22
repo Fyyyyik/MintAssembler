@@ -32,6 +32,24 @@ namespace Mint
 
         private bool IsObjectToken => Current.Type is TokenType.Object;
 
+        private bool IsTypeToken => Current.Type is TokenType.Int or
+                                                    TokenType.Float or
+                                                    TokenType.Bool or
+                                                    TokenType.String or
+                                                    TokenType.Byte or
+                                                    TokenType.UShort or
+                                                    TokenType.UInt or
+                                                    TokenType.ULong or
+                                                    TokenType.SByte or
+                                                    TokenType.Short or
+                                                    TokenType.Long or
+                                                    TokenType.Double or
+                                                    TokenType.Char or
+                                                    TokenType.WString or
+                                                    TokenType.Register or
+                                                    TokenType.Void or // technically not true but eh whatevs
+                                                    TokenType.Identifier;
+
         private Token Current => _tokens[_pos];
 
         private Token Peek(int offset = 1) => _tokens[Math.Min(_pos + offset, _tokens.Count - 1)];
@@ -231,7 +249,7 @@ namespace Mint
                     return ParseExternalConstructor(line, col);
             }
 
-            TypeNode? type = ParseType();
+            ITypeNode? type = ParseType();
             string name = Expect(TokenType.Identifier).Value;
 
             // Check whether it's a variable or a function.
@@ -249,13 +267,13 @@ namespace Mint
                 return ParseVariable(type, name, line, col);
         }
 
-        private VariableNode ParseVariable(TypeNode type, string name, int line, int col)
+        private VariableNode ParseVariable(ITypeNode type, string name, int line, int col)
         {
             Expect(TokenType.Semicolon);
             return new VariableNode(type, name, line, col);
         }
 
-        private FunctionNode ParseFunction(TypeNode? returnType, string name, int line, int col)
+        private FunctionNode ParseFunction(ITypeNode? returnType, string name, int line, int col)
         {
             List<ParamNode> parameters = ParseParameterList();
             bool isConst = Match(TokenType.Const);
@@ -264,9 +282,9 @@ namespace Mint
             return new FunctionNode(returnType, name, isConst, parameters, _foundThis, block, line, col);
         }
 
-        private ExternalFunctionNode ParseExternalFunction(TypeNode? returnType, string name, int line, int col)
+        private ExternalFunctionNode ParseExternalFunction(ITypeNode? returnType, string name, int line, int col)
         {
-            List<TypeNode> types = ParseTypeList();
+            List<ITypeNode> types = ParseTypeList();
             bool isConst = Match(TokenType.Const);
             Expect(TokenType.Semicolon);
             return new ExternalFunctionNode(returnType, name, isConst, types, line, col);
@@ -280,7 +298,7 @@ namespace Mint
 
         private ExternalConstructorNode ParseExternalConstructor(int line, int col)
         {
-            List<TypeNode> types = ParseTypeList();
+            List<ITypeNode> types = ParseTypeList();
             Expect(TokenType.Semicolon);
             return new ExternalConstructorNode(types, line, col);
         }
@@ -294,7 +312,7 @@ namespace Mint
             {
                 var (line, col) = CurrentPosition;
 
-                TypeNode? type = ParseType();
+                ITypeNode? type = ParseType();
                 if (type == null)
                     throw new ParserException(VOID_VARIABLE_MSG, line, col);
                 string name = Expect(TokenType.Identifier).Value;
@@ -307,16 +325,16 @@ namespace Mint
             return parameters;
         }
 
-        private List<TypeNode> ParseTypeList()
+        private List<ITypeNode> ParseTypeList()
         {
             Expect(TokenType.OpenParen);
 
-            List<TypeNode> types = new();
+            List<ITypeNode> types = new();
             while (!Check(TokenType.CloseParen) && !Check(TokenType.EOF))
             {
                 var (line, col) = CurrentPosition;
 
-                TypeNode? type = ParseType();
+                ITypeNode? type = ParseType();
                 if (type == null)
                     throw new ParserException(VOID_VARIABLE_MSG, line, col);
                 types.Add(type);
@@ -328,40 +346,62 @@ namespace Mint
             return types;
         }
 
-        public TypeNode? ParseType()
+        public ITypeNode? ParseType()
         {
             var (line, col) = CurrentPosition;
 
-            bool isConst = Match(TokenType.Const);
-            bool isRef = Match(TokenType.Ref);
-
-            if (Match(TokenType.Void))
-                return null;
-
-            string name = Current.Type switch
+            if (Match(TokenType.Const))
             {
-                TokenType.Int => "int",
-                TokenType.Float => "float",
-                TokenType.Bool => "bool",
-                TokenType.String => "string",
-                TokenType.Identifier => Current.Value,
-                _ => throw new ParserException(
-                        $"Expected a type but got '{Current.Value}'",
-                        Current.Line, Current.Column)
-            };
+                ITypeNode? constType = ParseType();
+                if (constType == null)
+                    throw new ParserException("Constant needs to have a proper type.", line, col);
+                return new ConstTypeNode(constType, line, col);
+            }
+
+            if (Match(TokenType.Ref))
+            {
+                ITypeNode? refType = ParseType();
+                if (refType == null)
+                    throw new ParserException("Reference needs to point to an object with a type.", line, col);
+                return new RefTypeNode(refType, line, col);
+            }
+
+            if (!IsTypeToken)
+                throw new ParserException($"Expected a type but got '{Current.Value}'.", line, col);
+
+            string name = Current.Value;
             _pos++;
             while (Match(TokenType.Dot))
                 name += "." + Expect(TokenType.Identifier).Value;
 
-            // Check for array suffix []
-            bool isArray = false;
-            if (Check(TokenType.OpenBracket) && Peek().Type == TokenType.CloseBracket)
+            ITypeNode? type = null;
+            if (name != "void")
+                type = new TypeNode(name, line, col);
+
+            // Arrays
+            while (Check(TokenType.OpenBracket))
             {
-                _pos += 2;
-                isArray = true;
+                (line, col) = CurrentPosition;
+
+                if (type == null)
+                    throw new ParserException("Arrays of 'void' elements are not allowed.", line, col);
+
+                _pos++;
+
+                if (!Check(TokenType.CloseBracket))
+                {
+                    ExprNode sizeExpr = ParsePrimary();
+                    if (sizeExpr is IntLiteralNode size)
+                        type = new ArrayTypeNode(type, size.Value, line, col);
+                    else
+                        throw new ParserException("Size of array must be an int literal.", line, col);
+                }
+                else type = new ArrayTypeNode(type, 0, line, col); // arrays are given a size of 0 by default
+
+                _pos++;
             }
 
-            return new TypeNode(name, isConst, isRef, line, col, isArray);
+            return type;
         }
 
         private BlockNode ParseBlock()
@@ -428,31 +468,18 @@ namespace Mint
             if (Current.Type is TokenType.Int or TokenType.Float or TokenType.Bool or TokenType.String)
                 return true;
 
-            if (Check(TokenType.Identifier))
+            // If we have type then an identifier then it's a declaration
+            int savedPos = _pos;
+            bool isDecl = false;
+            try
             {
-                int i = 1;
-                while (Peek(i).Type is TokenType.Identifier or TokenType.Dot)
-                {
-                    if ((Peek(i).Type == TokenType.Identifier && i % 2 == 0) ||
-                        (Peek(i).Type == TokenType.Dot && i % 2 == 1))
-                        i++;
-                    else if ((Peek(i).Type == TokenType.Identifier && i % 2 == 1) ||
-                             (Peek(i).Type == TokenType.OpenBracket &&
-                              Peek(i + 1).Type == TokenType.CloseBracket &&
-                              Peek(i + 2).Type == TokenType.Identifier))
-                        return true;
-                }
+                ITypeNode? type = ParseType();
+                if (type != null && Check(TokenType.Identifier))
+                    isDecl = true;
             }
-
-            // Also check for arrays like "MyClass[] classes"
-            if (Check(TokenType.Identifier) &&
-                Peek().Type == TokenType.OpenBracket &&
-                Peek(2).Type == TokenType.CloseBracket &&
-                Peek(3).Type == TokenType.Identifier
-            )
-                return true;
-
-            return false;
+            catch { }
+            _pos = savedPos;
+            return isDecl;
         }
 
         private IfNode ParseIf()
@@ -554,12 +581,15 @@ namespace Mint
         {
             var (line, col) = CurrentPosition;
 
-            TypeNode? type = ParseType();
+            ITypeNode? type = ParseType();
             if (type == null)
                 throw new ParserException(VOID_VARIABLE_MSG, line, col);
             string name = Expect(TokenType.Identifier).Value;
-            Expect(TokenType.Equals);
-            ExprNode initializer = ParseExpression();
+
+            ExprNode? initializer = null;
+            if (Match(TokenType.Equals))
+                initializer = ParseExpression();
+
             Expect(TokenType.Semicolon);
             return new VarDeclNode(type, name, initializer, line, col);
         }
@@ -889,47 +919,26 @@ namespace Mint
             // new operator
             if (Match(TokenType.New))
             {
-                TypeNode? type = ParseType();
-                if (type == null)
-                    throw new ParserException("Cannot create new instance of 'void'.", line, col);
-
-                if (type.IsArray)
-                    _pos -= 2; // hacky solution
-
-                if (Check(TokenType.OpenBracket))
-                {
-                    // Array can be 'new int[]', 'new int[3]', 'new int[] { 0, 1, 2 }' or 'new int[3] { 0, 1, 2 }'
-
-                    type = type with { IsArray = false };
-
-                    _pos++;
-                    ExprNode? size = null;
-                    if (!Match(TokenType.CloseBracket))
-                    {
-                        size = ParseExpression();
-                        Expect(TokenType.CloseBracket);
-                    }
-                    else if (Match(TokenType.OpenBrace))
-                    {
-                        List<ExprNode> inits = new List<ExprNode>();
-                        while (!Match(TokenType.CloseBrace))
-                        {
-                            inits.Add(ParseExpression());
-                            Match(TokenType.Comma);
-                        }
-                        return new ArrayCreationNode(type, size, line, col, inits);
-                    }
-
-                    // No initializer
-                    return new ArrayCreationNode(type, size, line, col);
-                }
-
-                // Trying to create new instance of int, bool, float and string doesn't mean shit
-                if (type.Name is "int" or "float" or "bool" or "string")
-                    throw new ParserException($"Cannot create new instance of '{type.Name}'.", line, col);
+                string objTypeName = ReadFullName();
 
                 // Object creation doesn't call a constructor so no parentheses and params (for now)
-                return new NewObjectNode(type.Name, line, col);
+                return new NewObjectNode(objTypeName, line, col);
+            }
+
+            // Array initialization
+            if (Match(TokenType.OpenBrace))
+            {
+                List<ExprNode> inits = new();
+                while (!Check(TokenType.EOF))
+                {
+                    inits.Add(ParseExpression());
+                    if (!Match(TokenType.Comma))
+                    {
+                        Expect(TokenType.CloseBrace);
+                        break;
+                    }
+                }
+                return new ArrayInitNode(inits, line, col);
             }
 
             // Identifier, can be a variable or a call or some struct (example : Vector3)
@@ -952,18 +961,14 @@ namespace Mint
             // Grouped expression and casts
             if (Match(TokenType.OpenParen))
             {
-                try
+                if (IsTypeToken)
                 {
-                    TypeNode? type = ParseType();
-                    if (type != null)
-                    {
-                        Expect(TokenType.CloseParen);
-                        return new TypeCastNode(type, ParseExpression(), line, col);
-                    }
+                    string typeName = Current.Value;
+                    _pos++;
+                    Expect(TokenType.CloseParen);
+                    return new TypeCastNode(typeName, ParseExpression(), line, col);
                 }
-                catch { }
 
-                // probably not a cast then
                 ExprNode expr = ParseExpression();
                 Expect(TokenType.CloseParen);
                 return expr;

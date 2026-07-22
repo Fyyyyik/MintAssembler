@@ -37,6 +37,8 @@ namespace Mint
             {
                 IllegalTokens = new()
                 {
+                    TokenType.New,
+
                     TokenType.Byte,
                     TokenType.UShort,
                     TokenType.UInt,

@@ -57,16 +57,41 @@ namespace Mint.Semantics
             _ => member
         };
 
-        private TypeNode RewriteType(TypeNode type)
+        private ITypeNode RewriteType(ITypeNode type)
         {
-            if (IsNeighborObject(type.Name))
+            ITypeNode[] typeTreeArray = type.ToArray();
+            if (typeTreeArray[^1] is not TypeNode typed)
+                throw new Exception("Last type in tree is not a TypeNode... somehow...");
+
+            if (IsNeighborObject(typed.Name))
             {
                 if (_currentObj != null)
-                    return type with { Name = $"{NameOperations.GetParent(_moduleSymbols.Name)}.{type.Name}" };
+                    return typed with { Name = $"{NameOperations.GetParent(_moduleSymbols.Name)}.{typed.Name}" };
                 if (_currentXRef != null)
-                    return type with { Name = $"{NameOperations.GetParent(_currentXRef.FullName)}.{type.Name}" };
+                    return typed with { Name = $"{NameOperations.GetParent(_currentXRef.FullName)}.{typed.Name}" };
             }
-            return type;
+
+            // Rebuild the tree
+            ITypeNode newTypeTree = typed;
+            for (int i = typeTreeArray.Length - 2; i >= 0; i--)
+            {
+                switch (typeTreeArray[i])
+                {
+                    case RefTypeNode refType:
+                        newTypeTree = refType with { Type = newTypeTree };
+                        break;
+                    case ConstTypeNode constType:
+                        newTypeTree = constType with { Type = newTypeTree };
+                        break;
+                    case ArrayTypeNode arrayType:
+                        newTypeTree = arrayType with { Type = newTypeTree };
+                        break;
+                    default:
+                        throw new Exception("Unknown type type.");
+                }
+            }
+
+            return newTypeTree;
         }
 
         private FunctionNode RewriteFunction(FunctionNode func)
@@ -90,8 +115,8 @@ namespace Mint.Semantics
 
         private ExternalFunctionNode RewriteExternalFunction(ExternalFunctionNode func)
         {
-            List<TypeNode> rewrittenParamTypes = new();
-            foreach (TypeNode type in func.ParamTypes)
+            List<ITypeNode> rewrittenParamTypes = new();
+            foreach (ITypeNode type in func.ParamTypes)
                 rewrittenParamTypes.Add(RewriteType(type));
             
             ExternalFunctionNode rewritten = func with { ParamTypes = rewrittenParamTypes };
@@ -120,8 +145,8 @@ namespace Mint.Semantics
 
         private ExternalConstructorNode RewriteExternalConstructor(ExternalConstructorNode constructor)
         {
-            List<TypeNode> rewrittenParamTypes = new();
-            foreach (TypeNode type in constructor.ParamTypes)
+            List<ITypeNode> rewrittenParamTypes = new();
+            foreach (ITypeNode type in constructor.ParamTypes)
                 rewrittenParamTypes.Add(RewriteType(type));
 
             return constructor with { ParamTypes = rewrittenParamTypes };
@@ -145,7 +170,9 @@ namespace Mint.Semantics
 
         private StmtNode RewriteStatement(StmtNode stmt) => stmt switch
         {
-            VarDeclNode vd => vd with { Initializer = RewriteExpression(vd.Initializer), Type = RewriteType(vd.Type) },
+            VarDeclNode vd => vd.Initializer != null ?
+                vd with { Initializer = RewriteExpression(vd.Initializer), Type = RewriteType(vd.Type) } :
+                vd with { Type = RewriteType(vd.Type) },
             AssignNode a => a with { Target = RewriteExpression(a.Target), Value = RewriteExpression(a.Value) },
             IfNode i => RewriteIf(i),
             WhileNode w => w with { Condition = RewriteExpression(w.Condition), Body = RewriteBlock(w.Body) },
@@ -199,7 +226,7 @@ namespace Mint.Semantics
             QualifiedCallNode qc => RewriteQualifiedCall(qc),
             MemberCallNode mc => RewriteMemberCall(mc),
             PushInstanceNode pi => RewritePushInstance(pi),
-            ArrayCreationNode ac => RewriteArrayCreation(ac),
+            ArrayInitNode ai => RewriteArrayInit(ai),
             IncrementNode inc => inc with { Target = RewriteExpression(inc.Target) },
             MemberOffsetNode mo => mo with { Object = RewriteExpression(mo.Object) },
             TypeCastNode tc => tc with { Expr = RewriteExpression(tc.Expr) },
@@ -316,22 +343,15 @@ namespace Mint.Semantics
             return pi with { CtArgs = rewrittenArgs };
         }
 
-        private ExprNode RewriteArrayCreation(ArrayCreationNode ac)
+        private ExprNode RewriteArrayInit(ArrayInitNode ai)
         {
-            ExprNode? rewrittenSize = null;
             List<ExprNode>? rewrittenInits = null;
 
-            if (ac.Size != null)
-                rewrittenSize = RewriteExpression(ac.Size);
+            rewrittenInits = new();
+            foreach (ExprNode init in ai.Initializers)
+                rewrittenInits.Add(RewriteExpression(init));
 
-            if (ac.Initializers != null)
-            {
-                rewrittenInits = new();
-                foreach (ExprNode init in ac.Initializers)
-                    rewrittenInits.Add(RewriteExpression(init));
-            }
-
-            return ac with { Size = rewrittenSize, Initializers = rewrittenInits };
+            return ai with { Initializers = rewrittenInits };
         }
 
         private int FindQualifiedIndex(string[] chain)

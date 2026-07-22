@@ -99,7 +99,7 @@ object Breath
 		Scn.Step.Chara.Trigger.Set(0);
 		Scn.Step.Hero.Effect.BindState();
 		
-		int effect = 0;
+		int effect;
 		if (Scn.Step.Hero.Utility.PlayerCount() == 4)
 			effect = 364;
 		else

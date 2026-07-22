@@ -9,9 +9,9 @@ namespace Mint.AstNodes
     public record BlockNode(List<StmtNode> Statements, int Line, int Column) : AstNode(Line, Column);
 
     public record VarDeclNode(
-        TypeNode Type,
+        ITypeNode Type,
         string Name,
-        ExprNode Initializer,
+        ExprNode? Initializer,
         int Line,
         int Column
     ) : StmtNode(Line, Column);

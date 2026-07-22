@@ -117,11 +117,13 @@ object TestClass
 		while (GObj.FootState.IsAir());
 
 		// Arrays
-		int[] myArray1 = new int[] { 1, 2, 3, 4 };
+		int[] myArray1 = { 1, 2, 3, 4 };
 		myArray1[1] = 5;
+		int[3] myArray2; // creates an array with 3 elements, all set to 0
+		float[5] myArray3 = { 1.0, 2.0, 3.0, 4.0, 5.0 };
 
-		float[] myArray2 = new float[3];
-		myArray2[0] = 1.0;
+		float[2] myArray4;
+		myArray4[0] = 1.0;
 
 		// ref are pointers
 		ref int myPtr = 0x80001234; // a ram address

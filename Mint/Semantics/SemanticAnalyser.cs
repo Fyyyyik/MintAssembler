@@ -7,7 +7,7 @@ namespace Mint.Semantics
     public class SemanticAnalyser
     {
         private readonly VersionRules _rules;
-        private readonly Dictionary<ExprNode, TypeNode?> _exprTypes = new();
+        private readonly Dictionary<ExprNode, ITypeNode?> _exprTypes = new();
         private readonly List<SemanticError> _errors = new();
         private ModuleSymbol _module;
         private ObjectSymbol? _currentClass;
@@ -178,19 +178,33 @@ namespace Mint.Semantics
                         break;
                     }
 
-                    TypeNode? initType = AnalyseExpr(varDecl.Initializer);
-                    if (initType == null)
+                    if (varDecl.Initializer != null)
                     {
-                        AddError($"Cannot assign 'void' to variable '{varDecl.Name}'.", varDecl);
-                        break;
-                    }
+                        if (varDecl.Type.IsArray() && varDecl.Initializer is ArrayInitNode arrayInit)
+                        {
+                            int size = varDecl.Type.GetArraySize();
+                            if (size != 0 && size != arrayInit.Initializers.Count)
+                                AddError($"Array initialization contains {arrayInit.Initializers.Count} elements" +
+                                    $"but variable declaration expects {size} elements.", varDecl);
+                            AnalyseExpr(varDecl.Initializer);
+                        }
+                        else
+                        {
+                            ITypeNode? initType = AnalyseExpr(varDecl.Initializer);
+                            if (initType == null)
+                            {
+                                AddError($"Cannot assign 'void' to variable '{varDecl.Name}'.", varDecl);
+                                break;
+                            }
 
-                    if (!CheckReferenceAssign(varDecl.Type, initType))
-                        if (!TypesMatch(varDecl.Type, initType))
-                            AddError(
-                                $"Cannot assign '{initType?.Name}' to variable of type '{varDecl.Type.Name}'",
-                                varDecl
-                            );
+                            if (!CheckReferenceAssign(varDecl.Type, initType))
+                                if (!TypesMatch(varDecl.Type, initType))
+                                    AddError(
+                                        $"Cannot assign '{initType?.GetTypeName()}' to variable of type '{varDecl.Type.GetTypeName()}'",
+                                        varDecl
+                                    );
+                        }
+                    }
 
                     _scopeStack.Define(varDecl.Name, varDecl.Type);
                     break;
@@ -202,8 +216,8 @@ namespace Mint.Semantics
                         AddError("Assignment is not allowed.", assign);
                         break;
                     }
-                    TypeNode? assignType = AnalyseExpr(assign.Value);
-                    TypeNode? targetType = AnalyseExpr(assign.Target);
+                    ITypeNode? assignType = AnalyseExpr(assign.Value);
+                    ITypeNode? targetType = AnalyseExpr(assign.Target);
                     if (targetType == null)
                     {
                         AddError("Assignment to 'void' is not allowed.", assign);
@@ -214,7 +228,7 @@ namespace Mint.Semantics
                         AddError("Cannot assign 'void' to assignable.", assign);
                         break;
                     }
-                    if (targetType.IsConst)
+                    if (targetType is ConstTypeNode)
                     {
                         AddError("Assignment to a constant value isn't allowed.", assign);
                         break;
@@ -223,14 +237,14 @@ namespace Mint.Semantics
                         break;
                     if (!TypesMatch(assignType, targetType))
                         AddError(
-                            $"Cannot assign '{assignType?.Name}' to variable of type '{targetType?.Name}'",
+                            $"Cannot assign '{assignType?.GetTypeName()}' to variable of type '{targetType?.GetTypeName()}'",
                             assign
                         );
                     break;
 
                 case IfNode ifStmt:
-                    TypeNode? condType = AnalyseExpr(ifStmt.Condition);
-                    if (condType?.Name != "bool")
+                    ITypeNode? condType = AnalyseExpr(ifStmt.Condition);
+                    if (condType?.GetBaseType().Name != "bool")
                         AddError("If condition must be a bool", ifStmt);
                     AnalyseBlock(ifStmt.Then);
                     if (ifStmt.ElseIf != null)
@@ -240,8 +254,8 @@ namespace Mint.Semantics
                     break;
 
                 case WhileNode whileStmt:
-                    TypeNode? whileCondType = AnalyseExpr(whileStmt.Condition);
-                    if (whileCondType?.Name != "bool")
+                    ITypeNode? whileCondType = AnalyseExpr(whileStmt.Condition);
+                    if (whileCondType?.GetBaseType().Name != "bool")
                         AddError("While condition must be a bool", whileStmt);
                     AnalyseBlock(whileStmt.Body);
                     break;
@@ -249,8 +263,8 @@ namespace Mint.Semantics
                 case ForNode forStmt:
                     _scopeStack.PushScope();
                     AnalyseStatement(forStmt.Initializer);
-                    TypeNode? forCondType = AnalyseExpr(forStmt.Condition);
-                    if (forCondType?.Name != "bool")
+                    ITypeNode? forCondType = AnalyseExpr(forStmt.Condition);
+                    if (forCondType?.GetBaseType().Name != "bool")
                         AddError("For condition must be a bool", forStmt);
                     AnalyseStatement(forStmt.Increment);
                     AnalyseBlock(forStmt.Body);
@@ -260,10 +274,10 @@ namespace Mint.Semantics
                 case ReturnNode ret:
                     if (_currentFunction?.ReturnType == null)
                         break;
-                    TypeNode? retType = ret.Value != null ? AnalyseExpr(ret.Value) : null;
+                    ITypeNode? retType = ret.Value != null ? AnalyseExpr(ret.Value) : null;
                     if (!TypesMatch(retType, _currentFunction?.ReturnType))
                         AddError(
-                            $"Return type '{retType?.Name}' does not match function return type '{_currentFunction?.ReturnType?.Name}'",
+                            $"Return type '{retType?.GetTypeName()}' does not match function return type '{_currentFunction?.ReturnType?.GetTypeName()}'",
                             ret
                         );
                     break;
@@ -273,21 +287,21 @@ namespace Mint.Semantics
                     break;
 
                 case YieldNode yield:
-                    TypeNode? frameCountType = AnalyseExpr(yield.FrameCount);
-                    if (frameCountType == null || frameCountType.Name != "int")
+                    ITypeNode? frameCountType = AnalyseExpr(yield.FrameCount);
+                    if (frameCountType == null || frameCountType.GetBaseType().Name != "int")
                         AddError("Yield frame count must be an int.", yield);
                     break;
             }
         }
 
-        private TypeNode? AnalyseExpr(ExprNode expr)
+        private ITypeNode? AnalyseExpr(ExprNode expr)
         {
-            TypeNode? type = expr switch
+            ITypeNode? type = expr switch
             {
-                IntLiteralNode _ => new TypeNode("int", true, false, expr.Line, expr.Column),
-                FloatLiteralNode _ => new TypeNode("float", true, false, expr.Line, expr.Column),
-                BoolLiteralNode _ => new TypeNode("bool", true, false, expr.Line, expr.Column),
-                StringLiteralNode _ => new TypeNode("string", true, false, expr.Line, expr.Column),
+                IntLiteralNode _ => new ConstTypeNode(new TypeNode("int", expr.Line, expr.Column), expr.Line, expr.Column),
+                FloatLiteralNode _ => new ConstTypeNode(new TypeNode("float", expr.Line, expr.Column), expr.Line, expr.Column),
+                BoolLiteralNode _ => new ConstTypeNode(new TypeNode("bool", expr.Line, expr.Column), expr.Line, expr.Column),
+                StringLiteralNode _ => new ConstTypeNode(new TypeNode("string", expr.Line, expr.Column), expr.Line, expr.Column),
 
                 IdentifierNode id => ResolveIdentifierType(id),
                 QualifiedAccessNode qa => ResolveQualifiedAccessType(qa),
@@ -301,7 +315,7 @@ namespace Mint.Semantics
                 MemberCallNode mc => ResolveMemberCallType(mc),
                 NewObjectNode no => ResolveNewObjectType(no),
                 PushInstanceNode pi => ResolvePushInstanceType(pi),
-                ArrayCreationNode ac => ResolveArrayCreationType(ac),
+                ArrayInitNode ai => ResolveArrayInitType(ai),
                 IncrementNode inc => ResolveIncrementType(inc),
                 MemberOffsetNode mo => ResolveMemberOffsetType(mo),
                 TypeCastNode tc => ResolveTypeCastType(tc),
@@ -315,14 +329,14 @@ namespace Mint.Semantics
             return type;
         }
 
-        private TypeNode? ResolveIdentifierType(IdentifierNode identifier)
+        private ITypeNode? ResolveIdentifierType(IdentifierNode identifier)
         {
-            TypeNode? type = _scopeStack.LookUp(identifier.Name);
+            ITypeNode? type = _scopeStack.LookUp(identifier.Name);
             _exprTypes[identifier] = type;
             return type;
         }
 
-        private TypeNode? ResolveQualifiedAccessType(QualifiedAccessNode qualifiedAccess)
+        private ITypeNode? ResolveQualifiedAccessType(QualifiedAccessNode qualifiedAccess)
         {
             // Full qualified path to a static variable
 
@@ -351,9 +365,9 @@ namespace Mint.Semantics
             return null;
         }
 
-        private TypeNode? ResolveMemberAccessType(MemberAccessNode memberAccess)
+        private ITypeNode? ResolveMemberAccessType(MemberAccessNode memberAccess)
         {
-            TypeNode? exprType = AnalyseExpr(memberAccess.Object);
+            ITypeNode? exprType = AnalyseExpr(memberAccess.Object);
             if (exprType == null)
             {
                 AddError("Can't access member from 'void' type.", memberAccess);
@@ -362,66 +376,79 @@ namespace Mint.Semantics
             }
 
             // Array length property
-            if (exprType.IsArray && memberAccess.Member == "Length")
+            if (exprType.IsArray() && memberAccess.Member == "Length")
             {
-                TypeNode type = new("int", true, false, memberAccess.Line, memberAccess.Column);
+                ITypeNode type = new ConstTypeNode(
+                    new TypeNode("int", memberAccess.Line, memberAccess.Column),
+                    memberAccess.Line,
+                    memberAccess.Column
+                );
                 _exprTypes[memberAccess] = type;
                 return type;
             }
 
-            TypeNode? accessType = ResolveMemberType(exprType, memberAccess.Member);
+            ITypeNode? accessType = ResolveMemberType(exprType.GetBaseType(), memberAccess.Member);
             _exprTypes[memberAccess] = accessType;
             return accessType;
         }
 
-        private TypeNode? ResolveArrayAccessType(ArrayAccessNode arrayAccess)
+        private ITypeNode? ResolveArrayAccessType(ArrayAccessNode arrayAccess)
         {
-            TypeNode? arrayType = AnalyseExpr(arrayAccess.Array);
-            TypeNode? indexType = AnalyseExpr(arrayAccess.Index);
+            ITypeNode? arrayType = AnalyseExpr(arrayAccess.Array);
+            ITypeNode? indexType = AnalyseExpr(arrayAccess.Index);
 
-            if (indexType?.Name != "int")
+            if (indexType == null)
+            {
+                AddError("Array index must not be 'void'.", arrayAccess);
+                _exprTypes[arrayAccess] = null;
+                return null;
+            }
+
+            if (indexType.IsRef() || indexType.IsArray())
+                AddError("Index type cannot be a reference or an array.", arrayAccess);
+
+            if (indexType.GetBaseType().Name != "int")
                 AddError("Array index must be an int.", arrayAccess);
 
-            if (arrayType == null || !arrayType.IsArray)
+            if (arrayType == null || !arrayType.IsArray())
             {
                 AddError("Cannot index into a non-array type.", arrayAccess);
                 _exprTypes[arrayAccess] = null;
                 return null;
             }
 
-            //TypeNode type = new(arrayType.Name, ar, arrayAccess.Line, arrayAccess.Column, true);
-            TypeNode type = arrayType with { IsArray = false };
+            ITypeNode type = arrayType.GetArrayAccess();
             _exprTypes[arrayAccess] = type;
             return type;
         }
 
-        private TypeNode? ResolveDereferenceType(DereferenceNode dereference)
+        private ITypeNode? ResolveDereferenceType(DereferenceNode dereference)
         {
-            TypeNode? type = AnalyseExpr(dereference.Reference);
+            ITypeNode? type = AnalyseExpr(dereference.Reference);
             if (type == null)
             {
                 AddError("Cannot dereference 'void'.", dereference);
                 _exprTypes[dereference] = null; 
                 return null;
             }
-            if (!_rules.Dereferenceable.Contains(type.Name))
+            if (!_rules.Dereferenceable.Contains(type.GetBaseType().Name))
             {
-                AddError($"Cannot dereference type '{type.Name}' in this version.", dereference);
+                AddError($"Cannot dereference type '{type.GetTypeName()}' in this version.", dereference);
                 _exprTypes[dereference] = null;
                 return null;
             }
-            if (!type.IsRef)
+            if (!type.IsRef())
             {
                 AddError("Cannot dereference non-reference type.", dereference);
                 _exprTypes[dereference] = null;
                 return null;
             }
-            type = type with { IsRef = false };
+            type = type.GetDereference();
             _exprTypes[dereference] = type;
             return type;
         }
 
-        private TypeNode? ResolveThisType(ThisNode ts)
+        private ITypeNode? ResolveThisType(ThisNode ts)
         {
             if (_currentClass == null)
             {
@@ -430,22 +457,35 @@ namespace Mint.Semantics
                 return null;
             }
 
-            TypeNode type = new(_currentClass.FullName, true, true, ts.Line, ts.Column);
+            ITypeNode type = new ConstTypeNode(
+                new RefTypeNode(
+                    new TypeNode(_currentClass.FullName, ts.Line, ts.Column),
+                    ts.Line,
+                    ts.Column
+                ),
+                ts.Line,
+                ts.Column
+            );
             _exprTypes[ts] = type;
             return type;
         }
 
-        private TypeNode? ResolveBinaryExprType(BinaryExprNode binaryExpr)
+        private ITypeNode? ResolveBinaryExprType(BinaryExprNode binaryExpr)
         {
-            TypeNode? left = AnalyseExpr(binaryExpr.Left);
-            TypeNode? right = AnalyseExpr(binaryExpr.Right);
+            ITypeNode? left = AnalyseExpr(binaryExpr.Left);
+            ITypeNode? right = AnalyseExpr(binaryExpr.Right);
 
             // Comparison operators produce bool
             if (binaryExpr.Op is "==" or "!=" or ">" or "<" or ">=" or "<=" or "&&" or "||")
             {
                 if (!TypesMatch(left, right))
-                    AddError($"Cannot compare '{left?.Name}' and '{right?.Name}'.", binaryExpr);
-                TypeNode type = new("bool", true, false, binaryExpr.Line, binaryExpr.Column);
+                    AddError($"Cannot compare '{left?.GetTypeName()}' and '{right?.GetTypeName()}'.", binaryExpr);
+
+                ITypeNode type = new ConstTypeNode(
+                    new TypeNode("bool", binaryExpr.Line, binaryExpr.Column),
+                    binaryExpr.Line,
+                    binaryExpr.Column
+                );
                 _exprTypes[binaryExpr] = type;
                 return type;
             }
@@ -454,9 +494,13 @@ namespace Mint.Semantics
             // Why the fuck would you want to do that to a float you psycho
             if (binaryExpr.Op is "&" or "|" or "<<" or ">>" or "^")
             {
-                if (left?.Name != "int" || right?.Name != "int")
+                if (left?.GetBaseType().Name != "int" || right?.GetBaseType().Name != "int")
                     AddError($"Operator '{binaryExpr.Op}' requires int operands.", binaryExpr);
-                TypeNode type = new("int", true, false, binaryExpr.Line, binaryExpr.Column);
+                ITypeNode type = new ConstTypeNode(
+                    new TypeNode("int", binaryExpr.Line, binaryExpr.Column),
+                    binaryExpr.Line,
+                    binaryExpr.Column
+                );
                 _exprTypes[binaryExpr] = type;
                 return type;
             }
@@ -464,7 +508,7 @@ namespace Mint.Semantics
             // Arithmetic operators
             if (!TypesMatch(left, right))
             {
-                AddError($"Cannot apply operator '{binaryExpr.Op}' to operands of type '{left?.Name}' and '{right?.Name}'.", binaryExpr);
+                AddError($"Cannot apply operator '{binaryExpr.Op}' to operands of type '{left?.GetTypeName()}' and '{right?.GetTypeName()}'.", binaryExpr);
                 _exprTypes[binaryExpr] = null;
                 return null;
             }
@@ -473,27 +517,34 @@ namespace Mint.Semantics
             return left;
         }
 
-        private TypeNode? ResolveUnaryExprType(UnaryExprNode unaryExpr)
+        private ITypeNode? ResolveUnaryExprType(UnaryExprNode unaryExpr)
         {
-            TypeNode? operand = AnalyseExpr(unaryExpr.Operand);
+            ITypeNode? operand = AnalyseExpr(unaryExpr.Operand);
 
-            if (unaryExpr.Op == "-" && operand?.Name is not ("int" or "float"))
+            if (operand == null)
+            {
+                AddError("Cannot use unary operator on 'void'.", unaryExpr);
+                _exprTypes[unaryExpr] = null;
+                return null;
+            }
+
+            if (unaryExpr.Op == "-" && operand.GetBaseType().Name is not ("int" or "float"))
                 AddError("Unary operator '-' requires an int or a float.", unaryExpr);
 
-            if (unaryExpr.Op == "!" && operand?.Name != "bool")
+            if (unaryExpr.Op == "!" && operand.GetBaseType().Name != "bool")
                 AddError("Unary operator '!' requires a bool.", unaryExpr);
 
             _exprTypes[unaryExpr] = operand;
             return operand;
         }
 
-        private TypeNode? ResolveQualifiedCallType(QualifiedCallNode qualifiedCall)
+        private ITypeNode? ResolveQualifiedCallType(QualifiedCallNode qualifiedCall)
         {
             string[] names = qualifiedCall.FullName.Split('.');
             string leadup = string.Join('.', names[..^1]);
             string funcName = names[^1];
 
-            List<TypeNode> argTypes = ResolveCallArgs(qualifiedCall.Args, qualifiedCall);
+            List<ITypeNode> argTypes = ResolveCallArgs(qualifiedCall.Args, qualifiedCall);
 
             if (_module.LocalObjects.TryGetValue(names[^2], out ObjectSymbol? locObj))
                 if (locObj.FindFunction(funcName, argTypes, out FunctionSymbol? objFunc))
@@ -516,9 +567,9 @@ namespace Mint.Semantics
             return null;
         }
 
-        private TypeNode? ResolveMemberCallType(MemberCallNode memberCall)
+        private ITypeNode? ResolveMemberCallType(MemberCallNode memberCall)
         {
-            TypeNode? exprType = AnalyseExpr(memberCall.Object);
+            ITypeNode? exprType = AnalyseExpr(memberCall.Object);
             if (exprType == null)
             {
                 AddError("Can't call function from 'void' type.", memberCall);
@@ -526,9 +577,9 @@ namespace Mint.Semantics
                 return null;
             }
 
-            List<TypeNode> argTypes = ResolveCallArgs(memberCall.Args, memberCall);
+            List<ITypeNode> argTypes = ResolveCallArgs(memberCall.Args, memberCall);
 
-            if (_module.LocalObjects.TryGetValue(exprType.Name.Split('.')[^1], out ObjectSymbol? obj))
+            if (_module.LocalObjects.TryGetValue(exprType.GetBaseType().Name.Split('.')[^1], out ObjectSymbol? obj))
             {
                 if (obj.FindFunction(memberCall.Name, argTypes, out FunctionSymbol? funcSbl))
                 {
@@ -538,7 +589,7 @@ namespace Mint.Semantics
                 }
             }
 
-            if (_module.XRefObjects.TryGetValue(exprType.Name, out XRefSymbol? xrefObj))
+            if (_module.XRefObjects.TryGetValue(exprType.GetBaseType().Name, out XRefSymbol? xrefObj))
             {
                 if (xrefObj.FindFunction(memberCall.Name, argTypes, out XRefFunctionSymbol? xrefFunc))
                 {
@@ -548,27 +599,34 @@ namespace Mint.Semantics
                 }
             }
 
-            AddError($"'{exprType.Name}' is not a known object. Did you forget to reference it with the 'xref' keyword ?", memberCall);
+            AddError($"'{exprType.GetTypeName()}' is not a known object. Did you forget to reference it with the 'xref' keyword ?", memberCall);
             _exprTypes[memberCall] = null;
             return null;
         }
 
-        private TypeNode? ResolveNewObjectType(NewObjectNode newObject)
+        private ITypeNode? ResolveNewObjectType(NewObjectNode newObject)
         {
-            TypeNode type = new(newObject.ClassName, true, false, newObject.Line, newObject.Column);
+            ITypeNode type = new RefTypeNode(
+                new TypeNode(newObject.ClassName, newObject.Line, newObject.Column),
+                newObject.Line, newObject.Column
+            );
             _exprTypes[newObject] = type;
             return type;
         }
 
-        private TypeNode? ResolvePushInstanceType(PushInstanceNode pushInstance)
+        private ITypeNode? ResolvePushInstanceType(PushInstanceNode pushInstance)
         {
-            TypeNode type = new(pushInstance.ObjectName, true, true, pushInstance.Line, pushInstance.Column);
+            ITypeNode type = new RefTypeNode(
+                new TypeNode(pushInstance.ObjectName, pushInstance.Line, pushInstance.Column),
+                pushInstance.Line,
+                pushInstance.Column
+            );
             _exprTypes[pushInstance] = type;
 
             if (pushInstance.CtArgs == null)
                 return type;
 
-            List<TypeNode> argTypes = ResolveCallArgs(pushInstance.CtArgs, pushInstance);
+            List<ITypeNode> argTypes = ResolveCallArgs(pushInstance.CtArgs, pushInstance);
 
             if (_module.LocalObjects.TryGetValue(pushInstance.ObjectName, out ObjectSymbol? objSbl))
                 if (objSbl.FindConstructor(argTypes, out _))
@@ -577,39 +635,72 @@ namespace Mint.Semantics
                 if (xrefSbl.FindConstructor(argTypes, out _))
                     return type;
 
-            AddError($"'{type.Name}' has no constructor with the specified parameter types.", pushInstance);
+            AddError($"'{type.GetTypeName()}' has no constructor with the specified parameter types.", pushInstance);
             return type;
         }
 
-        private TypeNode? ResolveArrayCreationType(ArrayCreationNode arrayCreation)
+        private ITypeNode? ResolveArrayInitType(ArrayInitNode arrayInit)
         {
-            TypeNode type = new(arrayCreation.ElementType.Name, true, false, arrayCreation.Line, arrayCreation.Column, true);
-            _exprTypes[arrayCreation] = type;
+            ITypeNode? arrayEleType = arrayInit.Initializers.Count > 0 ? AnalyseExpr(arrayInit.Initializers[0]) : null;
+            ITypeNode? nextType = arrayEleType;
+            for (int i = 1; i <= arrayInit.Initializers.Count; i++)
+            {
+                if (nextType == null)
+                {
+                    AddError($"Element {i} of array initialization is 'void'.", arrayInit);
+                    _exprTypes[arrayInit] = null;
+                    return null;
+                }
+                if (i == arrayInit.Initializers.Count)
+                    break;
+
+                nextType = AnalyseExpr(arrayInit.Initializers[i]);
+                if (!TypesMatch(arrayEleType, nextType))
+                    AddError(
+                        $"Expected type '{arrayEleType?.GetTypeName()}' for element {i} of array initialization but got type '{nextType?.GetTypeName()}'.",
+                        arrayInit
+                    );
+            }
+
+            if (arrayEleType == null)
+                arrayEleType = new TypeNode("int", arrayInit.Line, arrayInit.Column); // array has 0 elements so type is whatever
+
+            ITypeNode type = new ArrayTypeNode(arrayEleType, arrayInit.Initializers.Count, arrayInit.Line, arrayInit.Column);
+            _exprTypes[arrayInit] = type;
             return type;
         }
 
-        private TypeNode? ResolveIncrementType(IncrementNode increment)
+        private ITypeNode? ResolveIncrementType(IncrementNode increment)
         {
-            TypeNode? type = AnalyseExpr(increment.Target);
+            ITypeNode? type = AnalyseExpr(increment.Target);
             if (type == null)
             {
                 AddError("Cannot increment or decrement type 'void'.", increment);
                 _exprTypes[increment] = null;
                 return null;
             }
-            if (type.Name is "int" or "float")
+
+            if (type.IsRef())
+                AddError("Cannot increment or decrement reference.", increment);
+            if (type.IsConst())
+                AddError("Cannot increment or decrement constant.", increment);
+            if (type.IsArray())
+                AddError("Cannot increment or decrement array.", increment);
+
+            if (type.GetBaseType().Name is "int" or "float")
             {
                 _exprTypes[increment] = type;
                 return type;
             }
-            AddError($"Increment and decrement operations are only allowed on types 'int' and 'float'. Not type '{type.Name}'.", increment);
+
+            AddError($"Increment and decrement operations are only allowed on types 'int' and 'float'. Not type '{type.GetTypeName()}'.", increment);
             _exprTypes[increment] = null;
             return null;
         }
 
-        private TypeNode? ResolveMemberOffsetType(MemberOffsetNode memberOffset)
+        private ITypeNode? ResolveMemberOffsetType(MemberOffsetNode memberOffset)
         {
-            TypeNode? objType = AnalyseExpr(memberOffset.Object);
+            ITypeNode? objType = AnalyseExpr(memberOffset.Object);
             if (objType == null)
             {
                 AddError($"Cannot get offset for member '{memberOffset.Member}' from 'void'.", memberOffset);
@@ -617,52 +708,60 @@ namespace Mint.Semantics
                 return null;
             }
 
-            TypeNode? memberType = ResolveMemberType(objType, memberOffset.Member);
+            ITypeNode? memberType = ResolveMemberType(objType.GetBaseType(), memberOffset.Member);
             if (memberType == null)
             {
                 _exprTypes[memberOffset] = null;
                 return null;
             }
-            memberType = memberType with { IsRef = true };
+
+            memberType = new RefTypeNode(memberType, memberOffset.Line, memberOffset.Column);
             _exprTypes[memberOffset] = memberType;
             return memberType;
         }
 
-        private TypeNode? ResolveTypeCastType(TypeCastNode typeCast)
+        private ITypeNode? ResolveTypeCastType(TypeCastNode typeCast)
         {
-            TypeNode? exprType = AnalyseExpr(typeCast.Expr);
+            ITypeNode? exprType = AnalyseExpr(typeCast.Expr);
             if (exprType == null)
             {
-                AddError($"Cannot cast 'void' to type '{typeCast.Type.Name}'.", typeCast);
+                AddError($"Cannot cast 'void' to type '{typeCast.Type}'.", typeCast);
                 _exprTypes[typeCast] = null;
                 return null;
             }
 
-            if (exprType.Name == typeCast.Type.Name)
+            if (exprType.IsRef())
+                AddError("Cannot cast reference type.", typeCast);
+            if (exprType.IsArray())
+                AddError("Cannot cast array type.", typeCast);
+
+            TypeNode castTypeNode = new TypeNode(typeCast.Type, typeCast.Line, typeCast.Column);
+
+            if (exprType.GetBaseType().Name == typeCast.Type)
             {
-                _exprTypes[typeCast] = typeCast.Type;
-                return typeCast.Type;
+                _exprTypes[typeCast] = castTypeNode;
+                return castTypeNode;
             }
 
-            if (!_rules.AllowedCasts.TryGetValue(exprType.Name, out string[]? allowedTypes))
+            if (!_rules.AllowedCasts.TryGetValue(exprType.GetBaseType().Name, out string[]? allowedTypes))
             {
-                AddError($"Type '{exprType.Name}' cannot be casted to another type.", typeCast);
+                AddError($"Type '{exprType.GetTypeName()}' cannot be casted to another type.", typeCast);
                 _exprTypes[typeCast] = null;
                 return null;
             }
 
-            if (!allowedTypes.Contains(typeCast.Type.Name))
+            if (!allowedTypes.Contains(typeCast.Type))
             {
-                AddError($"Type '{exprType.Name}' cannot be casted to type '{typeCast.Type.Name}'.", typeCast);
+                AddError($"Type '{exprType.GetTypeName()}' cannot be casted to type '{typeCast.Type}'.", typeCast);
                 _exprTypes[typeCast] = null;
                 return null;
             }
 
-            _exprTypes[typeCast] = typeCast.Type;
-            return typeCast.Type;
+            _exprTypes[typeCast] = castTypeNode;
+            return castTypeNode;
         }
 
-        private TypeNode? ResolveMemberType(TypeNode objType, string member)
+        private ITypeNode? ResolveMemberType(TypeNode objType, string member)
         {
             // Find it in the classes (or xrefs)
             if (_module.LocalObjects.TryGetValue(objType.Name, out ObjectSymbol? obj))
@@ -687,12 +786,12 @@ namespace Mint.Semantics
             return null;
         }
 
-        private List<TypeNode> ResolveCallArgs(IList<ExprNode> args, AstNode context)
+        private List<ITypeNode> ResolveCallArgs(IList<ExprNode> args, AstNode context)
         {
-            List<TypeNode> argTypes = new();
+            List<ITypeNode> argTypes = new();
             foreach (ExprNode arg in args)
             {
-                TypeNode? argType = AnalyseExpr(arg);
+                ITypeNode? argType = AnalyseExpr(arg);
                 if (argType == null)
                 {
                     AddError("Argument needs to have a defined type.", context);
@@ -703,7 +802,7 @@ namespace Mint.Semantics
             return argTypes;
         }
 
-        private void CheckArguments(IList<TypeNode> expectedTypes, IList<ExprNode> arguments, AstNode context, string funcName)
+        private void CheckArguments(IList<ITypeNode> expectedTypes, IList<ExprNode> arguments, AstNode context, string funcName)
         {
             if (expectedTypes.Count != arguments.Count)
             {
@@ -713,16 +812,50 @@ namespace Mint.Semantics
 
             for (int i = 0; i < expectedTypes.Count; i++)
             {
-                TypeNode? argType = AnalyseExpr(arguments[i]);
+                ITypeNode? argType = AnalyseExpr(arguments[i]);
                 if (!TypesMatch(expectedTypes[i], argType))
-                    AddError($"Argument {i + 1} of {funcName} expects '{expectedTypes[i].Name}' but got '{argType?.Name}'.", context);
+                    AddError($"Argument {i + 1} of {funcName} expects '{expectedTypes[i].GetTypeName()}' but got '{argType?.GetTypeName()}'.", context);
             }
         }
 
-        private static bool TypesMatch(TypeNode? a,  TypeNode? b)
+        private static bool TypesMatch(ITypeNode? a, ITypeNode? b)
         {
             if (a == null || b == null) return false;
-            return a.Name == b.Name && a.IsArray == b.IsArray && a.IsRef == b.IsRef;
+
+            ITypeNode tempA = a, tempB = b;
+            while (tempA is not TypeNode && tempB is not TypeNode)
+            {
+                if (tempA is ConstTypeNode constTypeA)
+                {
+                    tempA = constTypeA.Type;
+                    continue;
+                }
+
+                if (tempB is ConstTypeNode constTypeB)
+                {
+                    tempB = constTypeB.Type;
+                    continue;
+                }
+
+                if (tempA.GetType() != tempB.GetType())
+                    return false;
+
+                if (tempA is ArrayTypeNode arrayTypeA && tempB is ArrayTypeNode arrayTypeB && arrayTypeA.Size != arrayTypeB.Size)
+                    return false;
+
+                tempA = tempA.GetChildType();
+                tempB = tempB.GetChildType();
+            }
+
+            while (tempA is ConstTypeNode)
+                tempA = tempA.GetChildType();
+            while (tempB is ConstTypeNode)
+                tempB = tempB.GetChildType();
+
+            if ((tempA is TypeNode || tempB is TypeNode) && tempA.GetType() != tempB.GetType())
+                return false;
+
+            return a.GetBaseType().Name == b.GetBaseType().Name;
         }
 
         private void AddError(string message, AstNode node)
@@ -733,13 +866,13 @@ namespace Mint.Semantics
         private string GetFullObjectName(string objName) => $"{NameOperations.GetParent(_module.Name)}.{objName}";
 
         // Special exceptions related to assigning references
-        private bool CheckReferenceAssign(TypeNode targetType, TypeNode valueType)
+        private bool CheckReferenceAssign(ITypeNode targetType, ITypeNode valueType)
         {
-            if (targetType.IsRef && !valueType.IsRef && valueType.Name == "int")
+            if (targetType.IsRef() && !valueType.IsRef() && valueType.GetBaseType().Name == "int")
                 return true;
 
             // automatic reinterpretation to ref
-            if (targetType.IsRef && !valueType.IsRef && IsObject(valueType.Name))
+            if (targetType.IsRef() && !valueType.IsRef() && IsObject(valueType.GetBaseType().Name))
                 return true;
 
             return false;
