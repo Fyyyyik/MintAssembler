@@ -8,6 +8,8 @@ namespace Mint.Semantics
     public record SemanticResult(
         ModuleSymbol Module,
         Dictionary<ExprNode, ITypeNode?> ExprTypes,
+        Dictionary<ExprNode, ICallable> ExprCalls,
+        Dictionary<ExprNode, IAccessible> ExprAccesses,
         IReadOnlyList<SemanticError> Errors
     );
 

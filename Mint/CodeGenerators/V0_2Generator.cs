@@ -6,6 +6,7 @@ using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Diagnostics.CodeAnalysis;
+using System.Reflection.Metadata;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices.Marshalling;
 using System.Text;
@@ -757,7 +758,7 @@ namespace Mint.CodeGenerators
 
             ITypeNode[] argTypes = GetTypesFromArgs(qualifiedCall.Args, qualifiedCall.Line, qualifiedCall.Column);
 
-            writer.Append(TryGenerateReturnInstanceSetup(qualifiedCall.FullName, argTypes, destRegister, out bool isReturn));
+            writer.Append(TryGenerateReturnInstanceSetup(GetFuncSymbol(qualifiedCall), destRegister, out bool isReturn));
 
             List<byte> regs = new();
             foreach (ExprNode arg in qualifiedCall.Args)
@@ -769,7 +770,7 @@ namespace Mint.CodeGenerators
             for (int i = 0; i < regs.Count; i++)
                 writer.Instructions.Add(new Instruction(GetOpcode("ldfrsr"), (byte)(isReturn ? i + 1 : i), regs[i]));
 
-            ushort v = (ushort)AddOrGetXRef(AppendParamTypes(qualifiedCall.FullName, argTypes));
+            ushort v = (ushort)AddOrGetXRef(qualifiedCall.FullName + CreateCallParamTypes(qualifiedCall));
             (byte, byte) vBytes = CodeWriter.ToBytes(v);
             writer.Instructions.Add(new Instruction(GetOpcode("call"), 0xFF, vBytes.Item1, vBytes.Item2));
 
@@ -796,7 +797,7 @@ namespace Mint.CodeGenerators
                 );
 
             string fullName = $"{objType.GetBaseType().Name}.{memberCall.Name}";
-            writer.Append(TryGenerateReturnInstanceSetup(fullName, argTypes, destRegister, out bool isReturn));
+            writer.Append(TryGenerateReturnInstanceSetup(GetFuncSymbol(memberCall), destRegister, out bool isReturn));
 
             byte objReg = _registers.AllocateRegister();
             writer.Append(GenerateExpr(memberCall.Object, objReg));
@@ -820,7 +821,7 @@ namespace Mint.CodeGenerators
                     regs[i]
                 ));
 
-            ushort v = (ushort)AddOrGetXRef(AppendParamTypes(fullName, argTypes));
+            ushort v = (ushort)AddOrGetXRef($"{fullName}{CreateCallParamTypes(memberCall)}");
             (byte, byte) vBytes = CodeWriter.ToBytes(v);
             writer.Instructions.Add(new Instruction(GetOpcode("call"), 0xFF, vBytes.Item1, vBytes.Item2));
 
@@ -834,15 +835,14 @@ namespace Mint.CodeGenerators
         }
 
         private CodeWriter.CodeResult TryGenerateReturnInstanceSetup(
-            string funcName,
-            IList<ITypeNode> argTypes,
+            ICallable callable,
             byte destRegister,
             out bool isReturn)
         {
             CodeWriter writer = new();
 
             isReturn = false;
-            if (DoesFunctionReturn(funcName, argTypes, out ITypeNode? returnType))
+            if (DoesFunctionReturn(callable, out ITypeNode? returnType))
             {
                 isReturn = true;
                 TypeNode returnBaseType = returnType.GetBaseType();
@@ -1195,49 +1195,46 @@ namespace Mint.CodeGenerators
 
         protected byte GetOpcode(string name) => OpcodeHelper.OpcodeByName[Version][name];
 
-        protected bool DoesFunctionReturn(string fullName, IList<ITypeNode> paramTypes, [NotNullWhen(true)] out ITypeNode? returnType)
+        protected bool DoesFunctionReturn(ICallable funcCalled, [NotNullWhen(true)] out ITypeNode? returnType)
         {
             bool isReturn = false;
-            ITypeNode? type = null;
-            GetFuncSymbol(fullName, paramTypes)?.Switch(
-                objFunc =>
-                {
-                    isReturn = objFunc.ReturnType != null;
-                    type = objFunc.ReturnType;
-                },
-                xrefFunc =>
-                {
-                    isReturn = xrefFunc.ReturnType != null;
-                    type = xrefFunc.ReturnType;
-                }
-            );
-            returnType = type;
+
+            if (funcCalled is FunctionSymbol funcSbl)
+            {
+                returnType = funcSbl.ReturnType;
+                isReturn = funcSbl.ReturnType != null;
+            }
+            else if (funcCalled is XRefFunctionSymbol xrefSbl)
+            {
+                returnType = xrefSbl.ReturnType;
+                isReturn = xrefSbl.ReturnType != null;
+            }
+            else throw new NotImplementedException("Unknown callable type.");
+
             return isReturn;
         }
 
-        protected OneOf<FunctionSymbol, XRefFunctionSymbol>? GetFuncSymbol(string fullName, IList<ITypeNode> paramTypes)
+        protected ICallable GetFuncSymbol(ExprNode call)
         {
-            string[] names = fullName.Split('.');
-            if (_semantic.Module.LocalObjects.TryGetValue(names[^2], out ObjectSymbol? objSbl))
-                if (objSbl.FindFunction(names[^1], paramTypes, out FunctionSymbol? objFuncSbl))
-                    return objFuncSbl;
-            if (_semantic.Module.XRefObjects.TryGetValue(string.Join('.', names[..^1]), out XRefSymbol? xrefSbl))
-                if (xrefSbl.FindFunction(names[^1], paramTypes, out XRefFunctionSymbol? xrefFuncSbl))
-                    return xrefFuncSbl;
-            return null;
+            if (_semantic.ExprCalls.TryGetValue(call, out ICallable? callable))
+                return callable;
+            throw new CodeGeneratorException("Couldn't find function symbol from call expression.", call.Line, call.Column);
         }
 
-        protected string AppendParamTypes(string fullName, IList<ITypeNode> paramTypes)
+        protected string CreateCallParamTypes(ExprNode call)
         {
-            StringBuilder sb = new(fullName);
+            StringBuilder sb = new();
 
-            ITypeNode[]? funcArgTypes = null;
-            GetFuncSymbol(fullName, paramTypes)?.Switch(
-                (funcSbl) => funcArgTypes = Utility.ToTypeNodes(funcSbl.Parameters),
-                (xrefSbl) => funcArgTypes = xrefSbl.ArgumentTypes.ToArray()
-            );
-            if (funcArgTypes == null)
-                throw new CodeGeneratorException($"Could not get parameter types from function symbol with name '{fullName}'.", 0, 0);
+            ICallable? callable = GetFuncSymbol(call);
+            if (callable == null)
+                throw new CodeGeneratorException($"Could not get function symbol from call expression.", call.Line, call.Column);
+
+            ITypeNode[] funcArgTypes;
+            if (callable is FunctionSymbol funcSbl)
+                funcArgTypes = Utility.ToTypeNodes(funcSbl.Parameters);
+            else if (callable is XRefFunctionSymbol xrefFuncSbl)
+                funcArgTypes = xrefFuncSbl.ArgumentTypes.ToArray();
+            else throw new NotImplementedException("Unknown callable type.");
 
             sb.Append('(');
             if (funcArgTypes.Length > 0)

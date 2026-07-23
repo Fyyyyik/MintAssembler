@@ -1,5 +1,6 @@
 ﻿using Mint.AstNodes;
 using Mint.Util;
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 
 namespace Mint.Semantics
@@ -8,6 +9,8 @@ namespace Mint.Semantics
     {
         private readonly VersionRules _rules;
         private readonly Dictionary<ExprNode, ITypeNode?> _exprTypes = new();
+        private readonly Dictionary<ExprNode, ICallable> _exprCalls = new();
+        private readonly Dictionary<ExprNode, IAccessible> _exprAccesses = new();
         private readonly List<SemanticError> _errors = new();
         private ModuleSymbol _module;
         private ObjectSymbol? _currentClass;
@@ -32,7 +35,7 @@ namespace Mint.Semantics
                 if (obj.Location == ObjectLocation.Local)
                     AnalyseObject(obj);
 
-            return new SemanticResult(_module, _exprTypes, _errors);
+            return new SemanticResult(_module, _exprTypes, _exprCalls, _exprAccesses, _errors);
         }
 
         private void BuildSymbolTable(ModuleNode module)
@@ -348,6 +351,7 @@ namespace Mint.Semantics
             if (_module.LocalObjects.TryGetValue(names[^2], out ObjectSymbol? locObj))
                 if (locObj.Variables.TryGetValue(varName, out VariableSymbol? locVar))
                 {
+                    _exprAccesses[qualifiedAccess] = locVar;
                     _exprTypes[qualifiedAccess] = locVar.Type;
                     return locVar.Type;
                 }
@@ -356,6 +360,7 @@ namespace Mint.Semantics
             if (_module.XRefObjects.TryGetValue(leadup, out XRefSymbol? xrefObj))
                 if (xrefObj.Variables.TryGetValue(varName, out VariableSymbol? xrefVar))
                 {
+                    _exprAccesses[qualifiedAccess] = xrefVar;
                     _exprTypes[qualifiedAccess] = xrefVar.Type;
                     return xrefVar.Type;
                 }
@@ -387,7 +392,9 @@ namespace Mint.Semantics
                 return type;
             }
 
-            ITypeNode? accessType = ResolveMemberType(exprType.GetBaseType(), memberAccess.Member);
+            ITypeNode? accessType = ResolveMemberType(exprType.GetBaseType(), memberAccess.Member, out IAccessible? accSbl);
+            if (accSbl != null)
+                _exprAccesses[memberAccess] = accSbl;
             _exprTypes[memberAccess] = accessType;
             return accessType;
         }
@@ -550,6 +557,7 @@ namespace Mint.Semantics
                 if (locObj.FindFunction(funcName, argTypes, out FunctionSymbol? objFunc))
                 {
                     CheckArguments(Utility.ToTypeNodes(objFunc.Parameters), qualifiedCall.Args, qualifiedCall, funcName);
+                    _exprCalls[qualifiedCall] = objFunc;
                     _exprTypes[qualifiedCall] = objFunc.ReturnType;
                     return objFunc.ReturnType;
                 }
@@ -558,6 +566,7 @@ namespace Mint.Semantics
                 if (xrefCls.FindFunction(funcName, argTypes, out XRefFunctionSymbol? xrefFunc))
                 {
                     CheckArguments(xrefFunc.ArgumentTypes, qualifiedCall.Args, qualifiedCall, funcName);
+                    _exprCalls[qualifiedCall] = xrefFunc;
                     _exprTypes[qualifiedCall] = xrefFunc.ReturnType;
                     return xrefFunc.ReturnType;
                 }
@@ -584,6 +593,7 @@ namespace Mint.Semantics
                 if (obj.FindFunction(memberCall.Name, argTypes, out FunctionSymbol? funcSbl))
                 {
                     CheckArguments(Utility.ToTypeNodes(funcSbl.Parameters), memberCall.Args, memberCall, memberCall.Name);
+                    _exprCalls[memberCall] = funcSbl;
                     _exprTypes[memberCall] = funcSbl.ReturnType;
                     return funcSbl.ReturnType;
                 }
@@ -594,6 +604,7 @@ namespace Mint.Semantics
                 if (xrefObj.FindFunction(memberCall.Name, argTypes, out XRefFunctionSymbol? xrefFunc))
                 {
                     CheckArguments(xrefFunc.ArgumentTypes, memberCall.Args, memberCall, memberCall.Name);
+                    _exprCalls[memberCall] = xrefFunc;
                     _exprTypes[memberCall] = xrefFunc.ReturnType;
                     return xrefFunc.ReturnType;
                 }
@@ -708,7 +719,11 @@ namespace Mint.Semantics
                 return null;
             }
 
-            ITypeNode? memberType = ResolveMemberType(objType.GetBaseType(), memberOffset.Member);
+            ITypeNode? memberType = ResolveMemberType(objType.GetBaseType(), memberOffset.Member, out IAccessible? accSbl);
+
+            if (accSbl != null)
+                _exprAccesses[memberOffset] = accSbl;
+
             if (memberType == null)
             {
                 _exprTypes[memberOffset] = null;
@@ -761,13 +776,18 @@ namespace Mint.Semantics
             return castTypeNode;
         }
 
-        private ITypeNode? ResolveMemberType(TypeNode objType, string member)
+        private ITypeNode? ResolveMemberType(TypeNode objType, string member, out IAccessible? accessSbl)
         {
+            accessSbl = null;
+
             // Find it in the classes (or xrefs)
             if (_module.LocalObjects.TryGetValue(objType.Name, out ObjectSymbol? obj))
             {
                 if (obj.Variables.TryGetValue(member, out VariableSymbol? varSbl))
+                {
+                    accessSbl = varSbl;
                     return varSbl.Type;
+                }
 
                 AddError($"'{objType.Name}' has no member '{member}'.", objType);
                 return null;
@@ -776,7 +796,10 @@ namespace Mint.Semantics
             if (_module.XRefObjects.TryGetValue(objType.Name, out XRefSymbol? xrefObj))
             {
                 if (xrefObj.Variables.TryGetValue(member, out VariableSymbol? xrefVar))
+                {
+                    accessSbl = xrefVar;
                     return xrefVar.Type;
+                }
 
                 AddError($"'{objType.Name}' has no member '{member}'. Did you forget to reference it ?", objType);
                 return null;

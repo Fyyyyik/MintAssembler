@@ -3,6 +3,10 @@ using System.Diagnostics.CodeAnalysis;
 
 namespace Mint.Semantics
 {
+    public interface ICallable;
+
+    public interface IAccessible;
+
     public record ModuleSymbol
     {
         public required string Name { get; init; }
@@ -126,13 +130,13 @@ namespace Mint.Semantics
     }
 
     // Used for local and external references since external vars don't have different info
-    public record VariableSymbol
+    public record VariableSymbol : IAccessible
     {
         public required string Name { get; init; }
         public required ITypeNode Type { get; init; }
     }
 
-    public record FunctionSymbol
+    public record FunctionSymbol : ICallable
     {
         public required string Name { get; init; }
         public required ITypeNode? ReturnType { get; init; }
@@ -149,7 +153,7 @@ namespace Mint.Semantics
     An external function doesn't have a body, and we only care about the types of
     the parameters.
     */
-    public record XRefFunctionSymbol
+    public record XRefFunctionSymbol : ICallable
     {
         public required string Name { get; init; }
         public required ITypeNode? ReturnType { get; init; } = null;
