@@ -656,7 +656,22 @@ namespace Mint
                                                         or TokenType.DoubleGreaterEquals
                                                         or TokenType.DoubleLessEquals;
 
-        private ExprNode ParseExpression() => ParseLogicalOr();
+        private ExprNode ParseExpression() => ParseConditional();
+
+        private ExprNode ParseConditional()
+        {
+            ExprNode cond = ParseLogicalOr();
+            if (Check(TokenType.Question))
+            {
+                var (line, col) = CurrentPosition;
+                _pos++;
+                ExprNode trueExpr = ParseExpression();
+                Expect(TokenType.Colon);
+                ExprNode falseExpr = ParseExpression();
+                cond = new ConditionalNode(cond, trueExpr, falseExpr, line, col);
+            }
+            return cond;
+        }
 
         private ExprNode ParseLogicalOr()
         {
@@ -687,7 +702,7 @@ namespace Mint
         private ExprNode ParseEquality()
         {
             ExprNode left = ParseComparison();
-            while (Current.Type is TokenType.DoubleEquals or TokenType.NotEqual)
+            if (Current.Type is TokenType.DoubleEquals or TokenType.NotEqual)
             {
                 var (line, col) = CurrentPosition;
                 string op = _tokens[_pos++].Value;
@@ -700,7 +715,7 @@ namespace Mint
         private ExprNode ParseComparison()
         {
             ExprNode left = ParseOr();
-            while (Current.Type is TokenType.Greater or TokenType.GreaterEquals
+            if (Current.Type is TokenType.Greater or TokenType.GreaterEquals
                                 or TokenType.Lesser or TokenType.LesserEquals)
             {
                 var (line, col) = CurrentPosition;

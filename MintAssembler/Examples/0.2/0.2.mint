@@ -138,6 +138,12 @@ object TestClass
 
 		int castedInt = (int)*myPtr2;
 		float castedFloat = (float)savedX;
+
+		// doesn't work : only reference types can be dereferenced. Instead load pointer as a reference in a ref variable then dereference that
+		//int staticRamValue = *0x80001234;
+
+		if (x == y && x == 3)
+			yield GObj.FootState.IsGround() ? 1 : x; // ternary operator
 	}
 
 	float GetVec()

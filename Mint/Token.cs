@@ -75,7 +75,8 @@ namespace Mint
         Lesser,              // <
         GreaterEquals,       // >=
         LesserEquals,        // <=
-        Bang,                 // !
+        Bang,                // !
+        Question,            // ?
         PlusEquals,          // +=
         MinusEquals,         // -=
         StarEquals,          // *=

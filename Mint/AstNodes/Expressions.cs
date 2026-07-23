@@ -27,6 +27,7 @@ namespace Mint.AstNodes
     // Operations
     public record BinaryExprNode(ExprNode Left, string Op, ExprNode Right, int Line, int Column) : ExprNode(Line, Column);
     public record UnaryExprNode(string Op, ExprNode Operand, int Line, int Column) : ExprNode(Line, Column);
+    public record ConditionalNode(ExprNode Condition, ExprNode ValueIfTrue, ExprNode ValueIfFalse, int Line, int Column) : ExprNode(Line, Column);
 
     // Calls and construction
     public record QualifiedCallNode( // could either be calling a method from an object or a static method in some namespace

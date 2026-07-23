@@ -223,6 +223,12 @@ namespace Mint.Semantics
                 Right = RewriteExpression(be.Right)
             },
             UnaryExprNode ue => ue with { Operand = RewriteExpression(ue.Operand) },
+            ConditionalNode cd => cd with
+            {
+                Condition = RewriteExpression(cd.Condition),
+                ValueIfTrue = RewriteExpression(cd.ValueIfTrue),
+                ValueIfFalse = RewriteExpression(cd.ValueIfFalse)
+            },
             QualifiedCallNode qc => RewriteQualifiedCall(qc),
             MemberCallNode mc => RewriteMemberCall(mc),
             PushInstanceNode pi => RewritePushInstance(pi),

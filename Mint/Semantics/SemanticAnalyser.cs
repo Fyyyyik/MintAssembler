@@ -314,6 +314,7 @@ namespace Mint.Semantics
                 ThisNode ts => ResolveThisType(ts),
                 BinaryExprNode be => ResolveBinaryExprType(be),
                 UnaryExprNode ue => ResolveUnaryExprType(ue),
+                ConditionalNode cd => ResolveConditionalType(cd),
                 QualifiedCallNode qc => ResolveQualifiedCallType(qc),
                 MemberCallNode mc => ResolveMemberCallType(mc),
                 NewObjectNode no => ResolveNewObjectType(no),
@@ -543,6 +544,33 @@ namespace Mint.Semantics
 
             _exprTypes[unaryExpr] = operand;
             return operand;
+        }
+
+        private ITypeNode? ResolveConditionalType(ConditionalNode conditional)
+        {
+            ITypeNode? condType = AnalyseExpr(conditional.Condition);
+            if (condType == null)
+            {
+                AddError("Condition of conditional cannot be 'void'.", conditional);
+                _exprTypes[conditional] = null;
+                return null;
+            }
+
+            if (condType.IsRef())
+                AddError("Condition of conditional cannot be a reference.", conditional);
+            if (condType.IsArray())
+                AddError("Condition of conditional cannot be an array.", conditional);
+
+            if (condType.GetBaseType().Name != "bool")
+                AddError($"Expect type 'bool' for condition of conditional but got '{condType.GetBaseType().Name}'.", conditional);
+
+            ITypeNode? trueType = AnalyseExpr(conditional.ValueIfTrue);
+            ITypeNode? falseType = AnalyseExpr(conditional.ValueIfFalse);
+            if (!TypesMatch(trueType, falseType))
+                AddError("Type of values from conditional expression must match.", conditional);
+
+            _exprTypes[conditional] = trueType;
+            return trueType;
         }
 
         private ITypeNode? ResolveQualifiedCallType(QualifiedCallNode qualifiedCall)

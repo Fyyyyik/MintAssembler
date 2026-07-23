@@ -489,6 +489,7 @@ namespace Mint.CodeGenerators
             ThisNode => GenerateThis(destRegister),
             BinaryExprNode be => GenerateBinaryExpr(be, destRegister),
             UnaryExprNode ue => GenerateUnaryExpr(ue, destRegister),
+            ConditionalNode cd => GenerateConditional(cd, destRegister),
             QualifiedCallNode qc => GenerateQualifiedCall(qc, destRegister),
             MemberCallNode mc => GenerateMemberCall(mc, destRegister),
             PushInstanceNode pi => GeneratePushInstance(pi, destRegister),
@@ -749,6 +750,38 @@ namespace Mint.CodeGenerators
             writer.Instructions.Add(new Instruction(GetOpcode(opcode), destRegister, operandReg));
 
             writer.Append(GenerateFreeRegister(operandReg));
+            return writer.Result;
+        }
+
+        protected CodeWriter.CodeResult GenerateConditional(ConditionalNode conditional, byte destRegister)
+        {
+            CodeWriter writer = new();
+
+            byte condReg = _registers.AllocateRegister();
+            writer.Append(GenerateExpr(conditional.Condition, condReg));
+
+            int condJmpIdx = writer.Instructions.Count;
+            Instruction condJmp = new(GetOpcode("jmpneg"), condReg);
+            writer.Instructions.Add(condJmp);
+
+            writer.Append(GenerateFreeRegister(condReg));
+
+            writer.Append(GenerateExpr(conditional.ValueIfTrue, destRegister));
+
+            int trueJmpIdx = writer.Instructions.Count;
+            Instruction trueJmp = new(GetOpcode("jmp"));
+            writer.Instructions.Add(trueJmp);
+
+            short v = (short)(writer.Instructions.Count - condJmpIdx);
+            (byte, byte) vBytes = CodeWriter.ToBytes(v);
+            writer.Instructions[condJmpIdx] = condJmp with { X = vBytes.Item1, Y = vBytes.Item2 };
+
+            writer.Append(GenerateExpr(conditional.ValueIfFalse, destRegister));
+
+            v = (short)(writer.Instructions.Count - trueJmpIdx);
+            vBytes = CodeWriter.ToBytes(v);
+            writer.Instructions[trueJmpIdx] = trueJmp with { X = vBytes.Item1, Y = vBytes.Item2 };
+
             return writer.Result;
         }
 

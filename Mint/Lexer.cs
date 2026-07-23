@@ -298,6 +298,8 @@ namespace Mint
                         return new Token(TokenType.NotEqual, "!=", line, col);
                     }
                     return new Token(TokenType.Bang, "!", line, col);
+                case '?':
+                    return new Token(TokenType.Question, "?", line, col);
                 case '>':
                     switch (Current)
                     {
