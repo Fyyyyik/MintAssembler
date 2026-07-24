@@ -300,6 +300,11 @@ namespace Mint.Semantics
                         break;
                     }
 
+                    if (valueType.IsRef())
+                        AddError("Switch statement value cannot be a reference.", swi);
+                    if (valueType.IsArray())
+                        AddError("Switch statement value cannot be an array.", swi);
+
                     if (swi.Default != null)
                         foreach (StmtNode defaultStmt in swi.Default)
                             AnalyseStatement(defaultStmt);
@@ -363,6 +368,7 @@ namespace Mint.Semantics
                 IncrementNode inc => ResolveIncrementType(inc),
                 MemberOffsetNode mo => ResolveMemberOffsetType(mo),
                 TypeCastNode tc => ResolveTypeCastType(tc),
+                SwitchExprNode se => ResolveSwitchExprType(se),
 
                 _ => null
             };
@@ -842,6 +848,59 @@ namespace Mint.Semantics
 
             _exprTypes[typeCast] = castTypeNode;
             return castTypeNode;
+        }
+
+        private ITypeNode? ResolveSwitchExprType(SwitchExprNode switchExpr)
+        {
+            ITypeNode? valueType = AnalyseExpr(switchExpr.Value);
+            if (valueType == null)
+            {
+                AddError("Value for switch expression cannot be 'void'.", switchExpr);
+                _exprTypes[switchExpr] = null;
+                return null;
+            }
+
+            if (valueType.IsRef())
+                AddError("Value for switch expression cannot be a reference.", switchExpr);
+            if (valueType.IsArray())
+                AddError("Value for switch expression cannot be an array.", switchExpr);
+
+            ITypeNode? returnType = null;
+            foreach (var pair in switchExpr.Cases)
+            {
+                foreach (IUnalterable unalterable in pair.Key)
+                {
+                    ITypeNode? entryType = AnalyseExpr(unalterable.GetExpr());
+                    if (entryType == null)
+                    {
+                        AddError("Entry case expression cannot be 'void'.", switchExpr);
+                        continue;
+                    }
+
+                    if (!TypesMatch(valueType, entryType))
+                        AddError($"Expected type '{valueType.GetTypeName()}' but got '{entryType.GetTypeName()}' for case entry expression.", switchExpr);
+                }
+
+                ITypeNode? caseValueType = AnalyseExpr(pair.Value);
+                if (caseValueType == null)
+                    AddError("Case value for switch expression cannot be 'void'.", switchExpr);
+                else if (returnType == null)
+                    returnType = caseValueType;
+                else if (!TypesMatch(returnType, caseValueType))
+                    AddError($"Expected established type '{returnType}' for switch expression case value but got '{caseValueType}'.", switchExpr);
+            }
+
+            ITypeNode? defaultType = AnalyseExpr(switchExpr.Default);
+            if (defaultType == null)
+                AddError("Default case value in switch expression cannot be 'void'.", switchExpr);
+
+            if (returnType == null)
+                returnType = defaultType; // last chance to actually figure out the type of this thing if we haven't
+
+            if (returnType == null)
+                AddError("Couldn't resolve switch expression type, no case could specify a proper type.", switchExpr);
+            _exprTypes[switchExpr] = returnType;
+            return returnType;
         }
 
         private ITypeNode? ResolveMemberType(TypeNode objType, string member, out IAccessible? accessSbl)

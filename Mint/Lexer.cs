@@ -210,6 +210,8 @@ namespace Mint
                 sb.Append(Advance());
 
             string text = sb.ToString();
+            if (text == "_")
+                return new Token(TokenType.Underscore, "_", line, col);
 
             // Check if it's a keyword
             if (Keywords.TryGetValue(text, out TokenType type))
@@ -289,12 +291,17 @@ namespace Mint
                 case ']':
                     return new Token(TokenType.CloseBracket, "]", line, col);
                 case '=':
-                    if (Current == '=')
+                    switch (Current)
                     {
-                        Advance();
-                        return new Token(TokenType.DoubleEquals, "==", line, col);
+                        case '=':
+                            Advance();
+                            return new Token(TokenType.DoubleEquals, "==", line, col);
+                        case '>':
+                            Advance();
+                            return new Token(TokenType.WideArrow, "=>", line, col);
+                        default:
+                            return new Token(TokenType.Equals, "=", line, col);
                     }
-                    return new Token(TokenType.Equals, "=", line, col);
                 case '!':
                     if (Current == '=')
                     {

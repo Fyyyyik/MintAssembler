@@ -223,18 +223,14 @@ namespace Mint.Semantics
             foreach (KeyValuePair<List<IUnalterable>, List<StmtNode>> pair in switchNode.Cases)
             {
                 List<IUnalterable> unalterables = new();
-                bool ignore = false;
                 foreach (IUnalterable caseUnalt in pair.Key)
                 {
                     ExprNode rewrittenKey = RewriteExpression(caseUnalt.GetExpr());
                     if (rewrittenKey is not IUnalterable unalterable)
-                    {
-                        ignore = true;
-                        break;
-                    }
-                    unalterables.Add(unalterable);
+                        unalterables.Add(caseUnalt);
+                    else
+                        unalterables.Add(unalterable);
                 }
-                if (ignore) continue;
 
                 List<StmtNode> rewrittenValues = new();
                 foreach (StmtNode stmt in pair.Value)
@@ -276,6 +272,7 @@ namespace Mint.Semantics
             IncrementNode inc => inc with { Target = RewriteExpression(inc.Target) },
             MemberOffsetNode mo => mo with { Object = RewriteExpression(mo.Object) },
             TypeCastNode tc => tc with { Expr = RewriteExpression(tc.Expr) },
+            SwitchExprNode se => RewriteSwitchExpr(se),
 
             _ => expr
         };
@@ -398,6 +395,32 @@ namespace Mint.Semantics
                 rewrittenInits.Add(RewriteExpression(init));
 
             return ai with { Initializers = rewrittenInits };
+        }
+
+        private ExprNode RewriteSwitchExpr(SwitchExprNode switchExpr)
+        {
+            Dictionary<List<IUnalterable>, ExprNode> rewrittenCases = new();
+            foreach (var pair in switchExpr.Cases)
+            {
+                List<IUnalterable> rewrittenEntries = new();
+                foreach (IUnalterable entry in pair.Key)
+                {
+                    ExprNode rewrittenEntry = RewriteExpression(entry.GetExpr());
+                    if (rewrittenEntry is not IUnalterable unalterable)
+                        rewrittenEntries.Add(entry);
+                    else
+                        rewrittenEntries.Add(unalterable);
+                }
+
+                rewrittenCases.Add(rewrittenEntries, RewriteExpression(pair.Value));
+            }
+
+            return switchExpr with
+            {
+                Cases = rewrittenCases,
+                Value = RewriteExpression(switchExpr.Value),
+                Default = RewriteExpression(switchExpr.Default)
+            };
         }
 
         private int FindQualifiedIndex(string[] chain)

@@ -101,6 +101,7 @@ namespace Mint
         DoubleAmpersand,     // &&
         DoublePipe,          // ||
         Arrow,               // ->
+        WideArrow,           // =>
 
         // Punctuation
         Semicolon,          // ;
@@ -115,6 +116,7 @@ namespace Mint
         CloseBracket,       // ]
 
         // Special
+        Underscore,
         EOF
     }
 

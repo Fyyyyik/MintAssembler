@@ -165,6 +165,16 @@ object TestClass
 				Mint.Debug.puts("ahbgqiujfbckqiebvc");
 				break;
 		}
+
+		string message = x switch
+		{
+			1 => "Expr switch : x is 1",
+			2 => "Expr switch : x is 2",
+			3 => "Expr switch : x is 3",
+			4, 5, 6 => "Expr switch : x is 4, 5 or 6",
+
+			_ => "idk what x is lol"
+		};
 	}
 
 	float GetVec()

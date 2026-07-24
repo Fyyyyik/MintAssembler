@@ -76,4 +76,13 @@ namespace Mint.AstNodes
 
     // Casts
     public record TypeCastNode(string Type, ExprNode Expr, int Line, int Column) : ExprNode(Line, Column);
+
+    // Other
+    public record SwitchExprNode(
+        ExprNode Value,
+        Dictionary<List<IUnalterable>, ExprNode> Cases,
+        ExprNode Default,
+        int Line,
+        int Column
+    ) : ExprNode(Line, Column);
 }

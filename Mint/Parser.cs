@@ -730,7 +730,59 @@ namespace Mint
                                                         or TokenType.DoubleGreaterEquals
                                                         or TokenType.DoubleLessEquals;
 
-        private ExprNode ParseExpression() => ParseConditional();
+        private ExprNode ParseExpression() => ParseSwitchExpr();
+
+        private ExprNode ParseSwitchExpr()
+        {
+            ExprNode value = ParseConditional();
+            if (Match(TokenType.Switch))
+            {
+                var (line, col) = CurrentPosition;
+
+                Expect(TokenType.OpenBrace);
+                Dictionary<List<IUnalterable>, ExprNode> cases = new();
+                ExprNode? defaultCase = null;
+                while (!Check(TokenType.EOF) && !Check(TokenType.CloseBrace))
+                {
+                    var (lineCase, colCase) = CurrentPosition;
+
+                    if (Match(TokenType.Underscore))
+                    {
+                        if (defaultCase != null)
+                            throw new ParserException("Switch expression already has a default case defined.", lineCase, colCase);
+                        Expect(TokenType.WideArrow);
+                        defaultCase = ParseExpression();
+                    }
+                    else
+                    {
+                        List<IUnalterable> unalterables = new();
+                        do
+                        {
+                            ExprNode caseExpr = ParseExpression();
+                            if (caseExpr is not IUnalterable unalterable)
+                                throw new ParserException("Switch case entry expression must be non-alterable.", lineCase, colCase);
+                            unalterables.Add(unalterable);
+                        }
+                        while (Match(TokenType.Comma) && !Check(TokenType.EOF));
+
+                        Expect(TokenType.WideArrow);
+
+                        cases.Add(unalterables, ParseExpression());
+                    }
+
+                    if (!Check(TokenType.CloseBrace))
+                        Expect(TokenType.Comma);
+                }
+
+                Expect(TokenType.CloseBrace);
+
+                if (defaultCase == null)
+                    throw new ParserException("Switch expression requires a default case.", line, col);
+
+                value = new SwitchExprNode(value, cases, defaultCase, line, col);
+            }
+            return value;
+        }
 
         private ExprNode ParseConditional()
         {
