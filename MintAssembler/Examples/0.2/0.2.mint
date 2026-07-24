@@ -144,6 +144,24 @@ object TestClass
 
 		if (x == y && x == 3)
 			yield GObj.FootState.IsGround() ? 1 : x; // ternary operator
+
+		switch (x)
+		{
+			case 1:
+				Mint.Debug.puts("x is 1");
+				break;
+			case 2:
+				for (int j = 0; j < 6; j++)
+					Mint.Debug.puts("x is 2");
+				x += 2;
+				break;
+			default:
+				Mint.Debug.puts("the default case, if no other case matches");
+				break;
+			case 3:
+				Mint.Debug.puts("ahbgqiujfbckqiebvc");
+				break;
+		}
 	}
 
 	float GetVec()

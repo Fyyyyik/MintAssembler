@@ -43,6 +43,10 @@ namespace Mint
         Module,
         Do,
         Include,
+        Switch,
+        Case,
+        Default,
+        Break,
 
         // Types, the basic ones (could also be Identifiers, resolve those later)
         Void,

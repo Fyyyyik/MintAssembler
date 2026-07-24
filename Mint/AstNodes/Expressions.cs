@@ -6,13 +6,30 @@ namespace Mint.AstNodes
 {
     public interface IAssignable { }
 
+    public interface IUnalterable
+    {
+        public ExprNode GetExpr();
+    }
+
     public abstract record ExprNode(int Line, int Column) : AstNode(Line, Column);
 
     // Literals
-    public record IntLiteralNode(int Value, int Line, int Column) : ExprNode(Line, Column);
-    public record FloatLiteralNode(float Value, int Line, int Column) : ExprNode(Line, Column);
-    public record BoolLiteralNode(bool Value, int Line, int Column) : ExprNode(Line, Column);
-    public record StringLiteralNode(string Value, int Line, int Column) : ExprNode(Line, Column);
+    public record IntLiteralNode(int Value, int Line, int Column) : ExprNode(Line, Column), IUnalterable
+    {
+        public ExprNode GetExpr() => this;
+    }
+    public record FloatLiteralNode(float Value, int Line, int Column) : ExprNode(Line, Column), IUnalterable
+    {
+        public ExprNode GetExpr() => this;
+    }
+    public record BoolLiteralNode(bool Value, int Line, int Column) : ExprNode(Line, Column), IUnalterable
+    {
+        public ExprNode GetExpr() => this;
+    }
+    public record StringLiteralNode(string Value, int Line, int Column) : ExprNode(Line, Column), IUnalterable
+    {
+        public ExprNode GetExpr() => this;
+    }
 
     // Assignables
     public record IdentifierNode(string Name, int Line, int Column) : ExprNode(Line, Column), IAssignable;
@@ -22,7 +39,10 @@ namespace Mint.AstNodes
     public record DereferenceNode(ExprNode Reference, int Line, int Column) : ExprNode(Line, Column), IAssignable;
 
     // This
-    public record ThisNode(int Line, int Column): ExprNode(Line, Column);
+    public record ThisNode(int Line, int Column): ExprNode(Line, Column), IUnalterable
+    {
+        public ExprNode GetExpr() => this;
+    }
 
     // Operations
     public record BinaryExprNode(ExprNode Left, string Op, ExprNode Right, int Line, int Column) : ExprNode(Line, Column);

@@ -53,6 +53,10 @@ namespace Mint
             ["module"]    = TokenType.Module,
             ["do"]        = TokenType.Do,
             ["include"]   = TokenType.Include,
+            ["switch"]    = TokenType.Switch,
+            ["case"]      = TokenType.Case,
+            ["default"]   = TokenType.Default,
+            ["break"]     = TokenType.Break,
             ["true"]      = TokenType.BoolLiteral,
             ["false"]     = TokenType.BoolLiteral
         };

@@ -6,6 +6,7 @@ using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Diagnostics.CodeAnalysis;
+using System.Numerics;
 using System.Reflection.Metadata;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices.Marshalling;
@@ -193,6 +194,8 @@ namespace Mint.CodeGenerators
                 ReturnNode returnNode => GenerateReturn(returnNode),
                 ExprStmtNode expr => GenerateExprStmt(expr),
                 YieldNode yield => GenerateYield(yield),
+                SwitchNode switchNode => GenerateSwitch(switchNode),
+                BreakNode breakNode => GenerateBreak(breakNode),
 
                 _ => throw new NotImplementedException("Unknown statement type.")
             };
@@ -472,6 +475,80 @@ namespace Mint.CodeGenerators
             writer.Instructions.Add(new Instruction(GetOpcode("yield"), countReg));
 
             writer.Append(GenerateFreeRegister(countReg));
+            return writer.Result;
+        }
+
+        protected CodeWriter.CodeResult GenerateSwitch(SwitchNode switchNode)
+        {
+            ITypeNode? switchType = _semantic.ExprTypes[switchNode.Value];
+            if (switchType == null)
+                throw new CodeGeneratorException("Switch value type was not determined.", switchNode.Line, switchNode.Column);
+            string switchTypeName = switchType.GetBaseType().Name;
+
+            CodeWriter writer = new();
+
+            byte valueReg = _registers.AllocateRegister();
+            writer.Append(GenerateExpr(switchNode.Value, valueReg));
+
+            List<(int, Instruction)> endJumps = new();
+            foreach (KeyValuePair<IUnalterable, List<StmtNode>> pair in switchNode.Cases)
+            {
+                byte entryReg = _registers.AllocateRegister();
+                writer.Append(GenerateExpr(pair.Key.GetExpr(), entryReg));
+
+                byte resultReg = _registers.AllocateRegister();
+                writer.Instructions.Add(new Instruction(GetOpcode(switchTypeName switch
+                {
+                    "int" => "eqi32",
+                    "float" => "eqf32",
+                    "bool" => "eqbool",
+
+                    _ => throw new CodeGeneratorException(
+                        $"Invalid switch type '{switchTypeName}' for current version.",
+                        switchNode.Line,
+                        switchNode.Column
+                    )
+                }), resultReg, valueReg, entryReg));
+
+                writer.Append(GenerateFreeRegister(entryReg));
+
+                int jmpnegIdx = writer.Instructions.Count;
+                Instruction jmpnegInstr = new(GetOpcode("jmpneg"), resultReg);
+                writer.Instructions.Add(jmpnegInstr);
+
+                writer.Append(GenerateFreeRegister(resultReg));
+
+                foreach (StmtNode stmt in pair.Value)
+                    writer.Append(GenerateStatement(stmt));
+
+                (int, Instruction) endJump = (writer.Instructions.Count, new Instruction(GetOpcode("jmp")));
+                writer.Instructions.Add(endJump.Item2);
+                endJumps.Add(endJump);
+
+                short v = (short)(writer.Instructions.Count - jmpnegIdx);
+                (byte, byte) vBytes = CodeWriter.ToBytes(v);
+                writer.Instructions[jmpnegIdx] = jmpnegInstr with { X = vBytes.Item1, Y = vBytes.Item2 };
+            }
+
+            writer.Append(GenerateFreeRegister(valueReg));
+
+            if (switchNode.Default != null)
+                foreach (StmtNode stmt in switchNode.Default)
+                    writer.Append(GenerateStatement(stmt));
+
+            foreach (var endJump in endJumps)
+            {
+                short v = (short)(writer.Instructions.Count - endJump.Item1);
+                (byte, byte) vBytes = CodeWriter.ToBytes(v);
+                writer.Instructions[endJump.Item1] = endJump.Item2 with { X = vBytes.Item1, Y = vBytes.Item2 };
+            }
+
+            return writer.Result;
+        }
+
+        protected CodeWriter.CodeResult GenerateBreak(BreakNode breakNode)
+        {
+            CodeWriter writer = new();
             return writer.Result;
         }
 

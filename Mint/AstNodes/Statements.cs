@@ -54,4 +54,14 @@ namespace Mint.AstNodes
     public record ExprStmtNode(ExprNode Expr, int Line, int Column) : StmtNode(Line, Column);
 
     public record YieldNode(ExprNode FrameCount, int Line, int Column) : StmtNode(Line, Column);
+
+    public record SwitchNode(
+        ExprNode Value,
+        Dictionary<IUnalterable, List<StmtNode>> Cases,
+        int Line,
+        int Column,
+        List<StmtNode>? Default = null
+    ) : StmtNode(Line, Column);
+
+    public record BreakNode(int Line, int Column) : StmtNode(Line, Column);
 }

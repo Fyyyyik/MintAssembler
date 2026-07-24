@@ -264,14 +264,12 @@ namespace Mint.Semantics
                     break;
 
                 case ForNode forStmt:
-                    _scopeStack.PushScope();
                     AnalyseStatement(forStmt.Initializer);
                     ITypeNode? forCondType = AnalyseExpr(forStmt.Condition);
                     if (forCondType?.GetBaseType().Name != "bool")
                         AddError("For condition must be a bool", forStmt);
                     AnalyseStatement(forStmt.Increment);
                     AnalyseBlock(forStmt.Body);
-                    _scopeStack.PopScope();
                     break;
 
                 case ReturnNode ret:
@@ -293,6 +291,45 @@ namespace Mint.Semantics
                     ITypeNode? frameCountType = AnalyseExpr(yield.FrameCount);
                     if (frameCountType == null || frameCountType.GetBaseType().Name != "int")
                         AddError("Yield frame count must be an int.", yield);
+                    break;
+                case SwitchNode swi:
+                    ITypeNode? valueType = AnalyseExpr(swi.Value);
+                    if (valueType == null)
+                    {
+                        AddError("Switch compared value must not be 'void'.", swi);
+                        break;
+                    }
+
+                    if (swi.Default != null)
+                        foreach (StmtNode defaultStmt in swi.Default)
+                            AnalyseStatement(defaultStmt);
+
+                    foreach (var pair in swi.Cases)
+                    {
+                        if (pair.Key is not ExprNode caseEntryExpr)
+                        {
+                            AddError("Non-unalterable expression is not an expression.", swi);
+                            continue;
+                        }
+
+                        ITypeNode? caseValueType = AnalyseExpr(caseEntryExpr);
+                        if (caseValueType == null)
+                        {
+                            AddError("Case entry value must not be 'void'.", caseEntryExpr);
+                            continue;
+                        }
+
+                        if (!TypesMatch(valueType, caseValueType))
+                            AddError($"Expected type '{valueType.GetTypeName()}' for case entry " +
+                                $"value but got '{caseValueType.GetTypeName()}'.", caseEntryExpr);
+
+                        if (!caseValueType.IsConst())
+                            AddError("Case entry value must be constant.", caseEntryExpr);
+
+                        foreach (StmtNode caseStmt in pair.Value)
+                            AnalyseStatement(caseStmt);
+                    }
+
                     break;
             }
         }

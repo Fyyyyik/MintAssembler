@@ -186,6 +186,7 @@ namespace Mint.Semantics
             ReturnNode r => r with { Value = r.Value != null ? RewriteExpression(r.Value) : null },
             ExprStmtNode e => e with { Expr = RewriteExpression(e.Expr) },
             YieldNode y => y with { FrameCount = RewriteExpression(y.FrameCount) },
+            SwitchNode s => RewriteSwitch(s),
 
             _ => stmt
         };
@@ -204,6 +205,37 @@ namespace Mint.Semantics
                 rewritten = rewritten with { Else = RewriteBlock(rewritten.Else) };
 
             return rewritten;
+        }
+
+        private SwitchNode RewriteSwitch(SwitchNode switchNode)
+        {
+            SwitchNode rewritten = switchNode with { Value = RewriteExpression(switchNode.Value) };
+
+            if (switchNode.Default != null)
+            {
+                List<StmtNode> rewrittenDefault = new();
+                foreach (StmtNode stmt in switchNode.Default)
+                    rewrittenDefault.Add(RewriteStatement(stmt));
+                rewritten = rewritten with { Default = rewrittenDefault };
+            }
+
+            Dictionary<IUnalterable, List<StmtNode>> rewrittenCases = new();
+            foreach (KeyValuePair<IUnalterable, List<StmtNode>> pair in switchNode.Cases)
+            {
+                if (pair.Key is not ExprNode caseExpr)
+                    continue;
+                ExprNode rewrittenKey = RewriteExpression(caseExpr);
+                if (rewrittenKey is not IUnalterable unalterable)
+                    continue;
+
+                List<StmtNode> rewrittenValues = new();
+                foreach (StmtNode stmt in pair.Value)
+                    rewrittenValues.Add(RewriteStatement(stmt));
+
+                rewrittenCases.Add(unalterable, rewrittenValues);
+            }
+
+            return rewritten with { Cases = rewrittenCases };
         }
 
         private ExprNode RewriteExpression(ExprNode expr) => expr switch

@@ -447,6 +447,14 @@ namespace Mint
             if (Check(TokenType.Yield))
                 return ParseYield();
 
+            // switch
+            if (Check(TokenType.Switch))
+                return ParseSwitch();
+
+            // break
+            if (Check(TokenType.Break))
+                return ParseBreak();
+
             // Var declaration
             if (IsVarDecl())
                 return ParseVarDecl();
@@ -575,6 +583,65 @@ namespace Mint
             ExprNode frameCount = ParseExpression();
             Expect(TokenType.Semicolon);
             return new YieldNode(frameCount, line, col);
+        }
+
+        private SwitchNode ParseSwitch()
+        {
+            var (line, col) = CurrentPosition;
+
+            Expect(TokenType.Switch);
+            Expect(TokenType.OpenParen);
+            ExprNode value = ParseExpression();
+            Expect(TokenType.CloseParen);
+            Expect(TokenType.OpenBrace);
+
+            Dictionary<IUnalterable, List<StmtNode>> cases = new();
+            List<StmtNode>? defaultCase = null;
+            while (!Check(TokenType.EOF) && !Check(TokenType.CloseBrace))
+            {
+                var (caseLine, caseCol) = CurrentPosition;
+
+                if (Match(TokenType.Case))
+                {
+                    ExprNode comparerValue = ParseExpression();
+                    if (comparerValue is not IUnalterable unalterable)
+                        throw new ParserException("Case entry value cannot be an expression that can be changed one way or another.", caseLine, caseCol);
+                    Expect(TokenType.Colon);
+
+                    cases.Add(unalterable, new List<StmtNode>(ParseCaseStatements()));
+                }
+                else if (defaultCase == null)
+                {
+                    Expect(TokenType.Default);
+                    Expect(TokenType.Colon);
+
+                    defaultCase = new List<StmtNode>(ParseCaseStatements());
+                }
+                else throw new ParserException("Switch statement already has a default case set.", caseLine, caseCol);
+            }
+
+            Expect(TokenType.CloseBrace);
+
+            return new SwitchNode(value, cases, line, col, defaultCase);
+        }
+
+        private StmtNode[] ParseCaseStatements()
+        {
+            List<StmtNode> stmts = new();
+
+            do stmts.Add(ParseStatement());
+            while (!Check(TokenType.EOF) && stmts[^1] is not BreakNode);
+
+            return stmts.ToArray();
+        }
+
+        private BreakNode ParseBreak()
+        {
+            var (line, col) = CurrentPosition;
+
+            Expect(TokenType.Break);
+            Expect(TokenType.Semicolon);
+            return new BreakNode(line, col);
         }
 
         private VarDeclNode ParseVarDecl()
