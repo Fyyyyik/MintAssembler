@@ -219,20 +219,28 @@ namespace Mint.Semantics
                 rewritten = rewritten with { Default = rewrittenDefault };
             }
 
-            Dictionary<IUnalterable, List<StmtNode>> rewrittenCases = new();
-            foreach (KeyValuePair<IUnalterable, List<StmtNode>> pair in switchNode.Cases)
+            Dictionary<List<IUnalterable>, List<StmtNode>> rewrittenCases = new();
+            foreach (KeyValuePair<List<IUnalterable>, List<StmtNode>> pair in switchNode.Cases)
             {
-                if (pair.Key is not ExprNode caseExpr)
-                    continue;
-                ExprNode rewrittenKey = RewriteExpression(caseExpr);
-                if (rewrittenKey is not IUnalterable unalterable)
-                    continue;
+                List<IUnalterable> unalterables = new();
+                bool ignore = false;
+                foreach (IUnalterable caseUnalt in pair.Key)
+                {
+                    ExprNode rewrittenKey = RewriteExpression(caseUnalt.GetExpr());
+                    if (rewrittenKey is not IUnalterable unalterable)
+                    {
+                        ignore = true;
+                        break;
+                    }
+                    unalterables.Add(unalterable);
+                }
+                if (ignore) continue;
 
                 List<StmtNode> rewrittenValues = new();
                 foreach (StmtNode stmt in pair.Value)
                     rewrittenValues.Add(RewriteStatement(stmt));
 
-                rewrittenCases.Add(unalterable, rewrittenValues);
+                rewrittenCases.Add(unalterables, rewrittenValues);
             }
 
             return rewritten with { Cases = rewrittenCases };

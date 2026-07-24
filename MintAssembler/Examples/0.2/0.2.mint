@@ -155,10 +155,13 @@ object TestClass
 					Mint.Debug.puts("x is 2");
 				x += 2;
 				break;
+			case 3, 4, 6:
+				Mint.Debug.puts("x is 3, 4 or 6");
+				break;
 			default:
 				Mint.Debug.puts("the default case, if no other case matches");
 				break;
-			case 3:
+			case 5:
 				Mint.Debug.puts("ahbgqiujfbckqiebvc");
 				break;
 		}

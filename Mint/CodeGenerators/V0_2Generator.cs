@@ -483,7 +483,17 @@ namespace Mint.CodeGenerators
             ITypeNode? switchType = _semantic.ExprTypes[switchNode.Value];
             if (switchType == null)
                 throw new CodeGeneratorException("Switch value type was not determined.", switchNode.Line, switchNode.Column);
-            string switchTypeName = switchType.GetBaseType().Name;
+            byte switchEqualityOpcode = GetOpcode(switchType.GetBaseType().Name switch
+            {
+                "int" => "eqi32",
+                "float" => "eqf32",
+                "bool" => "eqbool",
+
+                _ => throw new CodeGeneratorException($"Invalid switch value type '{switchType.GetBaseType().Name}'.",
+                    switchNode.Line,
+                    switchNode.Column
+                )
+            });
 
             CodeWriter writer = new();
 
@@ -491,33 +501,41 @@ namespace Mint.CodeGenerators
             writer.Append(GenerateExpr(switchNode.Value, valueReg));
 
             List<(int, Instruction)> endJumps = new();
-            foreach (KeyValuePair<IUnalterable, List<StmtNode>> pair in switchNode.Cases)
+            foreach (KeyValuePair<List<IUnalterable>, List<StmtNode>> pair in switchNode.Cases)
             {
-                byte entryReg = _registers.AllocateRegister();
-                writer.Append(GenerateExpr(pair.Key.GetExpr(), entryReg));
+                // Declarations
+                short v;
+                (byte, byte) vBytes;
 
-                byte resultReg = _registers.AllocateRegister();
-                writer.Instructions.Add(new Instruction(GetOpcode(switchTypeName switch
+                // case entry
+                List<(int, Instruction)> successJumps = new();
+                foreach (IUnalterable unalterable in pair.Key)
                 {
-                    "int" => "eqi32",
-                    "float" => "eqf32",
-                    "bool" => "eqbool",
+                    byte entryReg = _registers.AllocateRegister();
+                    writer.Append(GenerateExpr(unalterable.GetExpr(), entryReg));
 
-                    _ => throw new CodeGeneratorException(
-                        $"Invalid switch type '{switchTypeName}' for current version.",
-                        switchNode.Line,
-                        switchNode.Column
-                    )
-                }), resultReg, valueReg, entryReg));
+                    byte resultReg = _registers.AllocateRegister();
+                    writer.Instructions.Add(new Instruction(switchEqualityOpcode, resultReg, valueReg, entryReg));
 
-                writer.Append(GenerateFreeRegister(entryReg));
+                    (int, Instruction) successJump = (writer.Instructions.Count, new Instruction(GetOpcode("jmppos"), resultReg));
+                    writer.Instructions.Add(successJump.Item2);
+                    successJumps.Add(successJump);
 
-                int jmpnegIdx = writer.Instructions.Count;
-                Instruction jmpnegInstr = new(GetOpcode("jmpneg"), resultReg);
-                writer.Instructions.Add(jmpnegInstr);
+                    writer.Append(GenerateFreeRegister(entryReg));
+                    writer.Append(GenerateFreeRegister(resultReg));
+                }
 
-                writer.Append(GenerateFreeRegister(resultReg));
+                (int, Instruction) failJump = (writer.Instructions.Count, new Instruction(GetOpcode("jmp")));
+                writer.Instructions.Add(failJump.Item2);
 
+                foreach (var successJump in successJumps)
+                {
+                    v = (short)(writer.Instructions.Count - successJump.Item1);
+                    vBytes = CodeWriter.ToBytes(v);
+                    writer.Instructions[successJump.Item1] = successJump.Item2 with { X = vBytes.Item1, Y = vBytes.Item2 };
+                }
+
+                // Case block
                 foreach (StmtNode stmt in pair.Value)
                     writer.Append(GenerateStatement(stmt));
 
@@ -525,12 +543,10 @@ namespace Mint.CodeGenerators
                 writer.Instructions.Add(endJump.Item2);
                 endJumps.Add(endJump);
 
-                short v = (short)(writer.Instructions.Count - jmpnegIdx);
-                (byte, byte) vBytes = CodeWriter.ToBytes(v);
-                writer.Instructions[jmpnegIdx] = jmpnegInstr with { X = vBytes.Item1, Y = vBytes.Item2 };
+                v = (short)(writer.Instructions.Count - failJump.Item1);
+                vBytes = CodeWriter.ToBytes(v);
+                writer.Instructions[failJump.Item1] = failJump.Item2 with { X = vBytes.Item1, Y = vBytes.Item2 };
             }
-
-            writer.Append(GenerateFreeRegister(valueReg));
 
             if (switchNode.Default != null)
                 foreach (StmtNode stmt in switchNode.Default)
@@ -542,6 +558,8 @@ namespace Mint.CodeGenerators
                 (byte, byte) vBytes = CodeWriter.ToBytes(v);
                 writer.Instructions[endJump.Item1] = endJump.Item2 with { X = vBytes.Item1, Y = vBytes.Item2 };
             }
+
+            writer.Append(GenerateFreeRegister(valueReg));
 
             return writer.Result;
         }

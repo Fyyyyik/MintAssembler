@@ -306,25 +306,28 @@ namespace Mint.Semantics
 
                     foreach (var pair in swi.Cases)
                     {
-                        if (pair.Key is not ExprNode caseEntryExpr)
+                        foreach (IUnalterable unalt in pair.Key)
                         {
-                            AddError("Non-unalterable expression is not an expression.", swi);
-                            continue;
+                            if (unalt is not ExprNode caseEntryExpr)
+                            {
+                                AddError("Non-unalterable expression is not an expression.", swi);
+                                continue;
+                            }
+
+                            ITypeNode? caseValueType = AnalyseExpr(caseEntryExpr);
+                            if (caseValueType == null)
+                            {
+                                AddError("Case entry value must not be 'void'.", caseEntryExpr);
+                                continue;
+                            }
+
+                            if (!TypesMatch(valueType, caseValueType))
+                                AddError($"Expected type '{valueType.GetTypeName()}' for case entry " +
+                                    $"value but got '{caseValueType.GetTypeName()}'.", caseEntryExpr);
+
+                            if (!caseValueType.IsConst())
+                                AddError("Case entry value must be constant.", caseEntryExpr);
                         }
-
-                        ITypeNode? caseValueType = AnalyseExpr(caseEntryExpr);
-                        if (caseValueType == null)
-                        {
-                            AddError("Case entry value must not be 'void'.", caseEntryExpr);
-                            continue;
-                        }
-
-                        if (!TypesMatch(valueType, caseValueType))
-                            AddError($"Expected type '{valueType.GetTypeName()}' for case entry " +
-                                $"value but got '{caseValueType.GetTypeName()}'.", caseEntryExpr);
-
-                        if (!caseValueType.IsConst())
-                            AddError("Case entry value must be constant.", caseEntryExpr);
 
                         foreach (StmtNode caseStmt in pair.Value)
                             AnalyseStatement(caseStmt);

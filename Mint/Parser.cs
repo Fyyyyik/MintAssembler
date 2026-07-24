@@ -595,7 +595,7 @@ namespace Mint
             Expect(TokenType.CloseParen);
             Expect(TokenType.OpenBrace);
 
-            Dictionary<IUnalterable, List<StmtNode>> cases = new();
+            Dictionary<List<IUnalterable>, List<StmtNode>> cases = new();
             List<StmtNode>? defaultCase = null;
             while (!Check(TokenType.EOF) && !Check(TokenType.CloseBrace))
             {
@@ -603,12 +603,19 @@ namespace Mint
 
                 if (Match(TokenType.Case))
                 {
-                    ExprNode comparerValue = ParseExpression();
-                    if (comparerValue is not IUnalterable unalterable)
-                        throw new ParserException("Case entry value cannot be an expression that can be changed one way or another.", caseLine, caseCol);
+                    List<IUnalterable> unalterables = new();
+                    do
+                    {
+                        ExprNode comparerValue = ParseExpression();
+                        if (comparerValue is not IUnalterable unalterable)
+                            throw new ParserException("Case entry value cannot be an expression that can be changed one way or another.", caseLine, caseCol);
+                        unalterables.Add(unalterable);
+                    }
+                    while (!Check(TokenType.EOF) && Match(TokenType.Comma));
+
                     Expect(TokenType.Colon);
 
-                    cases.Add(unalterable, new List<StmtNode>(ParseCaseStatements()));
+                    cases.Add(unalterables, new List<StmtNode>(ParseCaseStatements()));
                 }
                 else if (defaultCase == null)
                 {

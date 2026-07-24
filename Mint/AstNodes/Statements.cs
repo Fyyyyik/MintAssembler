@@ -57,7 +57,7 @@ namespace Mint.AstNodes
 
     public record SwitchNode(
         ExprNode Value,
-        Dictionary<IUnalterable, List<StmtNode>> Cases,
+        Dictionary<List<IUnalterable>, List<StmtNode>> Cases,
         int Line,
         int Column,
         List<StmtNode>? Default = null
