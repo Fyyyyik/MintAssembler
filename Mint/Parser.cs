@@ -264,13 +264,16 @@ namespace Mint
             else if (type == null)
                 throw new ParserException(VOID_VARIABLE_MSG, line, col);
             else
-                return ParseVariable(type, name, line, col);
+                return ParseVariable(type, name, line, col, isLocal);
         }
 
-        private VariableNode ParseVariable(ITypeNode type, string name, int line, int col)
+        private VariableNode ParseVariable(ITypeNode type, string name, int line, int col, bool isLocal)
         {
+            ExprNode? init = null;
+            if (isLocal && Match(TokenType.Equals))
+                init = ParseExpression();
             Expect(TokenType.Semicolon);
-            return new VariableNode(type, name, line, col);
+            return new VariableNode(type, name, line, col, init);
         }
 
         private FunctionNode ParseFunction(ITypeNode? returnType, string name, int line, int col)

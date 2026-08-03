@@ -136,10 +136,23 @@ namespace Mint.Semantics
             foreach (MemberNode member in obj.Members)
                 switch (member)
                 {
+                    case VariableNode varNode:
+                        AnalyseVariable(varNode);
+                        break;
                     case FunctionNode function:
                         AnalyseFunction(function);
                         break;
                 }
+        }
+
+        private void AnalyseVariable(VariableNode varNode)
+        {
+            if (varNode.Initializer == null) return;
+
+            ITypeNode? initType = AnalyseExpr(varNode.Initializer);
+            if (!TypesMatch(varNode.Type, initType))
+                AddError($"Cannot initialize variable '{varNode.Name}' with type '{varNode.Type.GetTypeName()}' " +
+                    $"with value of type '{initType?.GetTypeName()}'.", varNode);
         }
 
         private void AnalyseFunction(FunctionNode function)
@@ -714,11 +727,17 @@ namespace Mint.Semantics
             List<ITypeNode> argTypes = ResolveCallArgs(pushInstance.CtArgs, pushInstance);
 
             if (_module.LocalObjects.TryGetValue(pushInstance.ObjectName, out ObjectSymbol? objSbl))
-                if (objSbl.FindConstructor(argTypes, out _))
+                if (objSbl.FindConstructor(argTypes, out ConstructorSymbol? ctSbl))
+                {
+                    _exprCalls[pushInstance] = ctSbl;
                     return type;
+                }
             if (_module.XRefObjects.TryGetValue(pushInstance.ObjectName, out XRefSymbol? xrefSbl))
-                if (xrefSbl.FindConstructor(argTypes, out _))
+                if (xrefSbl.FindConstructor(argTypes, out XRefConstructorSymbol? xrefCtSbl))
+                {
+                    _exprCalls[pushInstance] = xrefCtSbl;
                     return type;
+                }
 
             AddError($"'{type.GetTypeName()}' has no constructor with the specified parameter types.", pushInstance);
             return type;
@@ -750,7 +769,11 @@ namespace Mint.Semantics
             if (arrayEleType == null)
                 arrayEleType = new TypeNode("int", arrayInit.Line, arrayInit.Column); // array has 0 elements so type is whatever
 
-            ITypeNode type = new ArrayTypeNode(arrayEleType, arrayInit.Initializers.Count, arrayInit.Line, arrayInit.Column);
+            ITypeNode type = new ConstTypeNode(
+                new ArrayTypeNode(arrayEleType, arrayInit.Initializers.Count, arrayInit.Line, arrayInit.Column),
+                arrayInit.Line,
+                arrayInit.Column
+            );
             _exprTypes[arrayInit] = type;
             return type;
         }

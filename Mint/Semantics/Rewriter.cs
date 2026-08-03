@@ -48,7 +48,9 @@ namespace Mint.Semantics
 
         private MemberNode RewriteMember(MemberNode member) => member switch
         {
-            VariableNode var => var with { Type = RewriteType(var.Type) },
+            VariableNode var => var.Initializer == null ?
+                var with { Type = RewriteType(var.Type) } :
+                var with { Type = RewriteType(var.Type), Initializer = RewriteExpression(var.Initializer) },
             FunctionNode func => RewriteFunction(func),
             ConstructorNode ct => RewriteConstructor(ct),
             ExternalFunctionNode xrefFunc => RewriteExternalFunction(xrefFunc),

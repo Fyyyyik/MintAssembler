@@ -57,6 +57,9 @@ namespace Mint
 
 object TestClass
 {
+	int intVal1;
+	int intVal2 = 3;
+	
 	void Exec()
 	{
 		// hex values are like this

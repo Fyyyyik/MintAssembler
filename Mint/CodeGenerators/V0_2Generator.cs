@@ -63,10 +63,12 @@ namespace Mint.CodeGenerators
                 Type = ObjectType.Class // TODO : make obj carry the type over
             };
 
+            List<VariableNode> varList = new();
             foreach (MemberNode member in obj.Members)
                 switch (member)
                 {
                     case VariableNode varNode:
+                        varList.Add(varNode); // process those later
                         mintObj.Variables.Add(new MintVariable(varNode.Type.GetTypeName(), varNode.Name));
                         break;
                     case FunctionNode funcNode:
@@ -74,8 +76,107 @@ namespace Mint.CodeGenerators
                         break;
                 }
 
+            mintObj.Functions.Add(GenerateVarInit(varList.ToArray()));
+
             _currentObj = null;
             return mintObj;
+        }
+
+        private MintFunction GenerateVarInit(VariableNode[] varNodes)
+        {
+            _registers = new();
+            _registers.PushNewBlock();
+
+            CodeWriter writer = new();
+
+            foreach (VariableNode varNode in varNodes)
+            {
+                if (varNode.Initializer == null) continue;
+
+                ushort v;
+                (byte, byte) vBytes;
+                string varXRef = $"{_currentObj?.FullName}.{varNode.Name}";
+                switch (varNode.Initializer)
+                {
+                    case ArrayInitNode arrayInit:
+                        byte arrReg = _registers.AllocateRegister();
+                        v = (ushort)AddOrGetXRef(varXRef);
+                        vBytes = CodeWriter.ToBytes(v);
+                        writer.Instructions.Add(new Instruction(GetOpcode("ldsrsv"), arrReg, vBytes.Item1, vBytes.Item2));
+
+                        byte idxReg = _registers.AllocateRegister();
+                        writer.Append(GenerateIntLiteral(new IntLiteralNode(0, 0, 0), idxReg));
+
+                        foreach (ExprNode init in arrayInit.Initializers)
+                        {
+                            byte valReg = _registers.AllocateRegister();
+                            writer.Append(GenerateExpr(init, valReg));
+
+                            byte cpyReg = _registers.AllocateRegister();
+                            writer.Instructions.Add(new Instruction(GetOpcode("ldsrsr"), cpyReg, arrReg));
+
+                            writer.Instructions.Add(new Instruction(GetOpcode("arirx"), cpyReg, idxReg));
+                            writer.Instructions.Add(new Instruction(GetOpcode("stsrsr"), cpyReg, valReg));
+
+                            writer.Append(GenerateFreeRegister(valReg));
+                            writer.Append(GenerateFreeRegister(cpyReg));
+
+                            writer.Instructions.Add(new Instruction(GetOpcode("inci32"), idxReg));
+                        }
+
+                        _registers.FreeRegister(arrReg);
+                        _registers.FreeRegister(idxReg);
+                        break;
+
+                    case PushInstanceNode pushInstance:
+                        if (pushInstance.CtArgs == null) break;
+
+                        byte instReg = _registers.AllocateRegister();
+                        v = (ushort)AddOrGetXRef(varXRef);
+                        vBytes = CodeWriter.ToBytes(v);
+                        writer.Instructions.Add(new Instruction(GetOpcode("ldsrsv"), instReg, vBytes.Item1, vBytes.Item2));
+
+                        List<byte> regs = new();
+                        foreach (ExprNode expr in pushInstance.CtArgs)
+                        {
+                            regs.Add(_registers.AllocateRegister());
+                            writer.Append(GenerateExpr(expr, regs[^1]));
+                        }
+
+                        writer.Instructions.Add(new Instruction(GetOpcode("ldfrsr"), 0, instReg));
+                        for (int i = 0; i < regs.Count; i++)
+                            writer.Instructions.Add(new Instruction(GetOpcode("ldfrsr"), (byte)(i + 1), regs[i]));
+
+                        v = (ushort)AddOrGetXRef($"{pushInstance.ObjectName}.this{CreateCallParamTypes(pushInstance)}");
+                        vBytes = CodeWriter.ToBytes(v);
+                        writer.Instructions.Add(new Instruction(GetOpcode("call"), 0xFF, vBytes.Item1, vBytes.Item2));
+
+                        foreach (byte reg in regs)
+                            writer.Append(GenerateFreeRegister(reg));
+
+                        _registers.FreeRegister(instReg);
+                        break;
+
+                    default:
+                        byte initReg = _registers.AllocateRegister();
+                        writer.Append(GenerateExpr(varNode.Initializer, initReg));
+
+                        v = (ushort)AddOrGetXRef(varXRef);
+                        vBytes = CodeWriter.ToBytes(v);
+                        writer.Instructions.Add(new Instruction(GetOpcode("stsvsr"), initReg, vBytes.Item1, vBytes.Item2));
+
+                        writer.Append(GenerateFreeRegister(initReg));
+                        break;
+                }
+            }
+
+            writer.Instructions.Add(new Instruction(GetOpcode("fleave")));
+            writer.Instructions.Insert(0, new Instruction(GetOpcode("fenter"), _registers.RegisterCount, 0));
+
+            return new MintFunction("void __Init()")
+            {
+                Data = writer.Result.Data
+            };
         }
 
         private MintFunction GenerateFunction(FunctionNode funcNode)
@@ -1399,6 +1500,11 @@ namespace Mint.CodeGenerators
                 returnType = xrefSbl.ReturnType;
                 isReturn = xrefSbl.ReturnType != null;
             }
+            else if (funcCalled is ConstructorSymbol or XRefConstructorSymbol)
+            {
+                returnType = null;
+                isReturn = false;
+            }
             else throw new NotImplementedException("Unknown callable type.");
 
             return isReturn;
@@ -1413,8 +1519,6 @@ namespace Mint.CodeGenerators
 
         protected string CreateCallParamTypes(ExprNode call)
         {
-            StringBuilder sb = new();
-
             ICallable? callable = GetFuncSymbol(call);
             if (callable == null)
                 throw new CodeGeneratorException($"Could not get function symbol from call expression.", call.Line, call.Column);
@@ -1424,7 +1528,13 @@ namespace Mint.CodeGenerators
                 funcArgTypes = Utility.ToTypeNodes(funcSbl.Parameters);
             else if (callable is XRefFunctionSymbol xrefFuncSbl)
                 funcArgTypes = xrefFuncSbl.ArgumentTypes.ToArray();
+            else if (callable is ConstructorSymbol ctSbl)
+                funcArgTypes = Utility.ToTypeNodes(ctSbl.Parameters);
+            else if (callable is XRefConstructorSymbol xrefCtSbl)
+                funcArgTypes = xrefCtSbl.ArgumentTypes.ToArray();
             else throw new NotImplementedException("Unknown callable type.");
+
+            StringBuilder sb = new();
 
             sb.Append('(');
             if (funcArgTypes.Length > 0)

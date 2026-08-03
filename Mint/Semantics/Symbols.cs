@@ -144,7 +144,7 @@ namespace Mint.Semantics
         public List<ParamNode> Parameters { get; } = new();
     }
 
-    public record ConstructorSymbol
+    public record ConstructorSymbol : ICallable
     {
         public List<ParamNode> Parameters { get; } = new();
     }
@@ -160,7 +160,7 @@ namespace Mint.Semantics
         public List<ITypeNode> ArgumentTypes { get; } = new();
     }
 
-    public record XRefConstructorSymbol
+    public record XRefConstructorSymbol : ICallable
     {
         public List<ITypeNode> ArgumentTypes { get; } = new();
     }

@@ -10,7 +10,8 @@ namespace Mint.AstNodes
         ITypeNode Type,
         string Name,
         int Line,
-        int Column
+        int Column,
+        ExprNode? Initializer = null
     ) : MemberNode(Line, Column);
 
     public record FunctionNode(
