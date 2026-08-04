@@ -154,12 +154,32 @@ namespace Mint
             if (_file == null)
                 throw new ParserException("Cannot parse include. No file was provided.", line, col);
 
-            string headerFileName = Expect(TokenType.StringLiteral).Value.Replace('/', '\\');
+            string headerFileName = "";
+            bool isModulePathBased = true;
+            if (Match(TokenType.Lesser))
+            {
+                while (!Check(TokenType.Greater) && !Check(TokenType.EOF))
+                    headerFileName += _tokens[_pos++].Value;
+                Expect(TokenType.Greater);
+                isModulePathBased = false;
+            }
+            else headerFileName = Expect(TokenType.StringLiteral).Value;
+            headerFileName = headerFileName.Replace('/', '\\');
             Expect(TokenType.Semicolon);
-            string? moduleDir = Path.GetDirectoryName(_file.FullName);
+
+            string? moduleDir = null;
+            if (isModulePathBased)
+                moduleDir = Path.GetDirectoryName(_file.FullName);
+            else
+                moduleDir = AppContext.BaseDirectory;
+
             if (moduleDir == null)
                 throw new ParserException("Failed to get the directory containing the module file.", line, col);
-            string headerPath = $"{moduleDir}{Path.DirectorySeparatorChar}{headerFileName}";
+
+            if (!moduleDir.EndsWith(Path.DirectorySeparatorChar))
+                moduleDir += Path.DirectorySeparatorChar;
+
+            string headerPath = $"{moduleDir}{headerFileName}";
 
             if (_includesVisited.Contains(headerPath))
                 return new(); // we already did this file, leave now before blowing up the program with infinite recursions

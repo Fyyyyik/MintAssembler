@@ -48,9 +48,7 @@ namespace Mint.Semantics
 
         private MemberNode RewriteMember(MemberNode member) => member switch
         {
-            VariableNode var => var.Initializer == null ?
-                var with { Type = RewriteType(var.Type) } :
-                var with { Type = RewriteType(var.Type), Initializer = RewriteExpression(var.Initializer) },
+            VariableNode var => RewriteVariable(var),
             FunctionNode func => RewriteFunction(func),
             ConstructorNode ct => RewriteConstructor(ct),
             ExternalFunctionNode xrefFunc => RewriteExternalFunction(xrefFunc),
@@ -76,23 +74,62 @@ namespace Mint.Semantics
             // Rebuild the tree
             ITypeNode newTypeTree = typed;
             for (int i = typeTreeArray.Length - 2; i >= 0; i--)
+                newTypeTree = AppendToTreeTop(newTypeTree, typeTreeArray[i]);
+
+            return newTypeTree;
+        }
+
+        private VariableNode RewriteVariable(VariableNode varNode)
+        {
+            VariableNode rewritten = varNode with { Type = RewriteType(varNode.Type) };
+            if (rewritten.Initializer == null) return rewritten;
+
+            rewritten = rewritten with { Initializer = RewriteExpression(rewritten.Initializer) };
+            if (rewritten.Type.IsArray() && rewritten.Initializer is ArrayInitNode arrayInit)
             {
-                switch (typeTreeArray[i])
-                {
-                    case RefTypeNode refType:
-                        newTypeTree = refType with { Type = newTypeTree };
-                        break;
-                    case ConstTypeNode constType:
-                        newTypeTree = constType with { Type = newTypeTree };
-                        break;
-                    case ArrayTypeNode arrayType:
-                        newTypeTree = arrayType with { Type = newTypeTree };
-                        break;
-                    default:
-                        throw new Exception("Unknown type type.");
-                }
+                ITypeNode[] typeTree = rewritten.Type.ToArray();
+
+                // Find the index of the first array type node
+                int arrayTypeIdx = -1;
+                for (int i = 0; i < typeTree.Length; i++)
+                    if (typeTree[i] is ArrayTypeNode)
+                        arrayTypeIdx = i;
+
+                // Reconstruct the tree from the end and change the array size
+                ITypeNode newType = rewritten.Type.GetBaseType();
+                for (int i = typeTree.Length - 2; i >= 0; i--)
+                    if (i == arrayTypeIdx)
+                    {
+                        if (typeTree[i] is not ArrayTypeNode arrayType)
+                            throw new Exception("Type at resolved array index is somehow not an array.");
+
+                        newType = arrayType with { Size = arrayInit.Initializers.Count, Type = newType };
+                    }
+                    else newType = AppendToTreeTop(newType, typeTree[i]);
+
+                rewritten = rewritten with { Type = newType };
             }
 
+            return rewritten;
+        }
+
+        private ITypeNode AppendToTreeTop(ITypeNode tree, ITypeNode top)
+        {
+            ITypeNode newTypeTree;
+            switch (top)
+            {
+                case RefTypeNode refType:
+                    newTypeTree = refType with { Type = tree };
+                    break;
+                case ConstTypeNode constType:
+                    newTypeTree = constType with { Type = tree };
+                    break;
+                case ArrayTypeNode arrayType:
+                    newTypeTree = arrayType with { Type = tree };
+                    break;
+                default:
+                    throw new Exception("Unknown type type.");
+            }
             return newTypeTree;
         }
 

@@ -697,7 +697,7 @@ namespace Mint.Semantics
                 }
             }
 
-            AddError($"'{exprType.GetTypeName()}' is not a known object. Did you forget to reference it with the 'xref' keyword ?", memberCall);
+            AddError($"'{exprType.GetTypeName()}' is not a known object.", memberCall);
             _exprTypes[memberCall] = null;
             return null;
         }
