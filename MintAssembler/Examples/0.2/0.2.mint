@@ -1,7 +1,7 @@
 module User.Tsuruoka.MintTest;
 
-// quotes tell the compiler to search based on where this module is, <> tells it to search based on the path of the currently running MintAssembler executable
-include <Examples/0.2/0.2.hmint>; // use slashes '/' to separate directory levels
+// <> tells it to search based on the path of the currently running MintAssembler executable, without those it checks based on the path of the current module
+include <"Examples/0.2/0.2.hmint">; // use slashes '/' to separate directory levels
 
 namespace HEL.Math
 {

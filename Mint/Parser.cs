@@ -158,8 +158,7 @@ namespace Mint
             bool isModulePathBased = true;
             if (Match(TokenType.Lesser))
             {
-                while (!Check(TokenType.Greater) && !Check(TokenType.EOF))
-                    headerFileName += _tokens[_pos++].Value;
+                headerFileName = Expect(TokenType.StringLiteral).Value;
                 Expect(TokenType.Greater);
                 isModulePathBased = false;
             }
