@@ -113,6 +113,8 @@ object TestClass
 		{
 			Scn.Step.Chara.ObjColl.AddAttack(x - 2, i, 1.0);
 			Scn.Step.Chara.ObjColl.AddAttack(1, 2, 3.0, 4.0, 5.0);
+			
+			if (i == 5) break;
 		}
 
 		yield x + y;
@@ -120,6 +122,7 @@ object TestClass
 		float count = 0.0;
 		while (GObj.FootState.IsGround())
 		{
+			break;
 			++count;
 		}
 

@@ -7,15 +7,19 @@ namespace Mint.Semantics
 {
     public class SemanticAnalyser
     {
-        private readonly VersionRules _rules;
+        // Semantic results
         private readonly Dictionary<ExprNode, ITypeNode?> _exprTypes = new();
         private readonly Dictionary<ExprNode, ICallable> _exprCalls = new();
         private readonly Dictionary<ExprNode, IAccessible> _exprAccesses = new();
         private readonly List<SemanticError> _errors = new();
+
+        // The other stuff
+        private readonly VersionRules _rules;
         private ModuleSymbol _module;
         private ObjectSymbol? _currentClass;
         private FunctionSymbol? _currentFunction;
         private readonly ScopeStack _scopeStack = new();
+        private readonly Stack<IBreakable> _currentBreakables = new();
 
         public SemanticAnalyser(VersionRules rules) => _rules = rules;
 
@@ -273,7 +277,10 @@ namespace Mint.Semantics
                     ITypeNode? whileCondType = AnalyseExpr(whileStmt.Condition);
                     if (whileCondType?.GetBaseType().Name != "bool")
                         AddError("While condition must be a bool", whileStmt);
+
+                    _currentBreakables.Push(whileStmt);
                     AnalyseBlock(whileStmt.Body);
+                    _currentBreakables.Pop();
                     break;
 
                 case ForNode forStmt:
@@ -282,7 +289,10 @@ namespace Mint.Semantics
                     if (forCondType?.GetBaseType().Name != "bool")
                         AddError("For condition must be a bool", forStmt);
                     AnalyseStatement(forStmt.Increment);
+
+                    _currentBreakables.Push(forStmt);
                     AnalyseBlock(forStmt.Body);
+                    _currentBreakables.Pop();
                     break;
 
                 case ReturnNode ret:
@@ -305,6 +315,7 @@ namespace Mint.Semantics
                     if (frameCountType == null || frameCountType.GetBaseType().Name != "int")
                         AddError("Yield frame count must be an int.", yield);
                     break;
+
                 case SwitchNode swi:
                     ITypeNode? valueType = AnalyseExpr(swi.Value);
                     if (valueType == null)
@@ -318,9 +329,13 @@ namespace Mint.Semantics
                     if (valueType.IsArray())
                         AddError("Switch statement value cannot be an array.", swi);
 
+                    _currentBreakables.Push(swi);
+
+                    _scopeStack.PushScope();
                     if (swi.Default != null)
                         foreach (StmtNode defaultStmt in swi.Default)
                             AnalyseStatement(defaultStmt);
+                    _scopeStack.PopScope();
 
                     foreach (var pair in swi.Cases)
                     {
@@ -347,10 +362,22 @@ namespace Mint.Semantics
                                 AddError("Case entry value must be constant.", caseEntryExpr);
                         }
 
+                        _scopeStack.PushScope();
                         foreach (StmtNode caseStmt in pair.Value)
                             AnalyseStatement(caseStmt);
+                        _scopeStack.PopScope();
                     }
 
+                    _currentBreakables.Pop();
+
+                    break;
+
+                case BreakNode breakNode:
+                    if (!_currentBreakables.TryPeek(out IBreakable? loop))
+                    {
+                        AddError("No enclosing loop to break out of.", breakNode);
+                        break;
+                    }
                     break;
             }
         }

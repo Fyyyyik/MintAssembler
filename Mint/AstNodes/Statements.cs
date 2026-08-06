@@ -4,6 +4,8 @@ using System.Text;
 
 namespace Mint.AstNodes
 {
+    public interface IBreakable;
+
     public abstract record StmtNode(int Line, int Column) : AstNode(Line, Column);
 
     public record BlockNode(List<StmtNode> Statements, int Line, int Column) : AstNode(Line, Column);
@@ -38,7 +40,7 @@ namespace Mint.AstNodes
         bool IsDoWhile,
         int Line,
         int Column
-    ) : StmtNode(Line, Column);
+    ) : StmtNode(Line, Column), IBreakable;
 
     public record ForNode(
         StmtNode Initializer,
@@ -47,7 +49,7 @@ namespace Mint.AstNodes
         BlockNode Body,
         int Line,
         int Column
-    ) : StmtNode(Line, Column);
+    ) : StmtNode(Line, Column), IBreakable;
 
     public record ReturnNode(ExprNode? Value, int Line, int Column) : StmtNode(Line, Column);
 
@@ -61,7 +63,7 @@ namespace Mint.AstNodes
         int Line,
         int Column,
         List<StmtNode>? Default = null
-    ) : StmtNode(Line, Column);
+    ) : StmtNode(Line, Column), IBreakable;
 
     public record BreakNode(int Line, int Column) : StmtNode(Line, Column);
 }

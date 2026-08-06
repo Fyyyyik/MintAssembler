@@ -30,10 +30,15 @@ namespace Mint.CodeGenerators
 
         private readonly List<byte> _sdata = new();
         private readonly List<string> _xrefs = new();
+
         private ObjectSymbol? _currentObj = null;
         private FunctionSymbol? _currentFunction = null;
+        private IBreakable? _currentBreakable = null;
+
         private HashSet<byte> _arrayRegs = new();
         private Dictionary<byte, string> _instanceRegs = new();
+
+        private readonly Stack<List<Instruction>> _breakJmps = new();
 
         public V0_2Generator(SemanticResult semantic) => _semantic = semantic;
 
@@ -321,21 +326,17 @@ namespace Mint.CodeGenerators
             return writer.Result;
         }
 
-        // TODO : override in 7.X (no more mint array)
-        protected CodeWriter.CodeResult GenerateAssign(AssignNode assign)
+        // Every kind of assign is separated for easy overrides in specific cases
+        protected CodeWriter.CodeResult GenerateAssign(AssignNode assign) => assign.Target switch
         {
-            // Every kind of assign is separated for easy overrides in specific cases
-            return assign.Target switch
-            {
-                IdentifierNode ident => GenerateExpr(assign.Value, _registers.VarToReg[ident.Name]),
-                ArrayAccessNode aa => GenerateArrayAssign(assign, aa),
-                MemberAccessNode ma => GenerateMemberAssign(assign, ma),
-                QualifiedAccessNode qa => GenerateQualifiedAssign(assign, qa),
-                DereferenceNode dr => GenerateDereferenceAssign(assign, dr),
+            IdentifierNode ident => GenerateExpr(assign.Value, _registers.VarToReg[ident.Name]),
+            ArrayAccessNode aa => GenerateArrayAssign(assign, aa),
+            MemberAccessNode ma => GenerateMemberAssign(assign, ma),
+            QualifiedAccessNode qa => GenerateQualifiedAssign(assign, qa),
+            DereferenceNode dr => GenerateDereferenceAssign(assign, dr),
 
-                _ => throw new CodeGeneratorException($"Unknown assign target node : {assign.Target}", assign.Line, assign.Column)
-            };
-        }
+            _ => throw new CodeGeneratorException($"Unknown assign target node : {assign.Target}", assign.Line, assign.Column)
+        };
 
         protected CodeWriter.CodeResult GenerateArrayAssign(AssignNode assign, ArrayAccessNode targetArray)
         {
@@ -466,6 +467,7 @@ namespace Mint.CodeGenerators
         protected CodeWriter.CodeResult GenerateWhile(WhileNode whileNode)
         {
             CodeWriter writer = new();
+            _breakJmps.Push(new());
 
             byte condReg = _registers.AllocateRegister();
             writer.Append(GenerateExpr(whileNode.Condition, condReg));
@@ -487,12 +489,14 @@ namespace Mint.CodeGenerators
             vBytes = CodeWriter.ToBytes(jmpnegLength);
             writer.Instructions[jmpnegInstructionPos] = jmpnegInstr with { X = vBytes.Item1, Y = vBytes.Item2 };
 
+            SetBreakJumpsV(writer);
             return writer.Result;
         }
 
         protected CodeWriter.CodeResult GenerateDoWhile(WhileNode whileNode)
         {
             CodeWriter writer = new();
+            _breakJmps.Push(new());
 
             writer.Append(GenerateBlock(whileNode.Body));
 
@@ -503,12 +507,14 @@ namespace Mint.CodeGenerators
             writer.Instructions.Add(new Instruction(GetOpcode("jmppos"), condReg, vBytes.Item1, vBytes.Item2));
             writer.Append(GenerateFreeRegister(condReg));
 
+            SetBreakJumpsV(writer);
             return writer.Result;
         }
 
         protected CodeWriter.CodeResult GenerateFor(ForNode forNode)
         {
             CodeWriter writer = new();
+            _breakJmps.Push(new());
 
             writer.Append(GenerateStatement(forNode.Initializer));
 
@@ -535,6 +541,7 @@ namespace Mint.CodeGenerators
             vBytes = CodeWriter.ToBytes(condJmpV);
             writer.Instructions[condJmpPos] = condJmpInstr with { X = vBytes.Item1, Y = vBytes.Item2 };
 
+            SetBreakJumpsV(writer);
             return writer.Result;
         }
 
@@ -587,11 +594,11 @@ namespace Mint.CodeGenerators
             byte switchEqualityOpcode = GetSwitchCompareOpcode(switchType, switchNode.Line, switchNode.Column);
 
             CodeWriter writer = new();
+            _breakJmps.Push(new());
 
             byte valueReg = _registers.AllocateRegister();
             writer.Append(GenerateExpr(switchNode.Value, valueReg));
 
-            List<(int, Instruction)> endJumps = new();
             foreach (KeyValuePair<List<IUnalterable>, List<StmtNode>> pair in switchNode.Cases)
             {
                 // Declarations
@@ -630,10 +637,6 @@ namespace Mint.CodeGenerators
                 foreach (StmtNode stmt in pair.Value)
                     writer.Append(GenerateStatement(stmt));
 
-                (int, Instruction) endJump = (writer.Instructions.Count, new Instruction(GetOpcode("jmp")));
-                writer.Instructions.Add(endJump.Item2);
-                endJumps.Add(endJump);
-
                 v = (short)(writer.Instructions.Count - failJump.Item1);
                 vBytes = CodeWriter.ToBytes(v);
                 writer.Instructions[failJump.Item1] = failJump.Item2 with { X = vBytes.Item1, Y = vBytes.Item2 };
@@ -643,21 +646,20 @@ namespace Mint.CodeGenerators
                 foreach (StmtNode stmt in switchNode.Default)
                     writer.Append(GenerateStatement(stmt));
 
-            foreach (var endJump in endJumps)
-            {
-                short v = (short)(writer.Instructions.Count - endJump.Item1);
-                (byte, byte) vBytes = CodeWriter.ToBytes(v);
-                writer.Instructions[endJump.Item1] = endJump.Item2 with { X = vBytes.Item1, Y = vBytes.Item2 };
-            }
-
             writer.Append(GenerateFreeRegister(valueReg));
 
+            SetBreakJumpsV(writer);
             return writer.Result;
         }
 
         protected CodeWriter.CodeResult GenerateBreak(BreakNode breakNode)
         {
             CodeWriter writer = new();
+
+            Instruction breakJmp = new(GetOpcode("jmp")); // prepare the jump for later
+            _breakJmps.Peek().Add(breakJmp);
+            writer.Instructions.Add(breakJmp);
+
             return writer.Result;
         }
 
@@ -1568,6 +1570,18 @@ namespace Mint.CodeGenerators
             _registers.FreeRegister(reg);
 
             return writer.Result;
+        }
+
+        protected void SetBreakJumpsV(CodeWriter writer)
+        {
+            foreach (Instruction breakJmp in _breakJmps.Pop())
+            {
+                int breakJmpIdx = writer.Instructions.IndexOf(breakJmp);
+
+                short breakJmpLength = (short)(writer.Instructions.Count - breakJmpIdx);
+                (byte, byte) vBytes = CodeWriter.ToBytes(breakJmpLength);
+                writer.Instructions[breakJmpIdx] = breakJmp with { X = vBytes.Item1, Y = vBytes.Item2 };
+            }
         }
 
         protected byte GetSwitchCompareOpcode(ITypeNode valType, int line, int col) => GetOpcode(valType.GetBaseType().Name switch
