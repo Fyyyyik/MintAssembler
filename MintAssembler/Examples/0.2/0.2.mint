@@ -112,6 +112,9 @@ object TestClass
 		for (int i = 0; i < 7; i++)
 		{
 			Scn.Step.Chara.ObjColl.AddAttack(x - 2, i, 1.0);
+
+			continue;
+
 			Scn.Step.Chara.ObjColl.AddAttack(1, 2, 3.0, 4.0, 5.0);
 			
 			if (i == 5) break;
@@ -123,10 +126,17 @@ object TestClass
 		while (GObj.FootState.IsGround())
 		{
 			break;
-			++count;
+			if (++count == 3.0)
+				continue;
+			GObj.Target.Invert();
 		}
 
-		do count--;
+		do
+		{
+			count--;
+			continue;
+			count++;
+		}
 		while (GObj.FootState.IsAir());
 
 		// Arrays

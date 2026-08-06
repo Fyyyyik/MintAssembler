@@ -39,6 +39,7 @@ namespace Mint.CodeGenerators
         private Dictionary<byte, string> _instanceRegs = new();
 
         private readonly Stack<List<Instruction>> _breakJmps = new();
+        private readonly Stack<List<Instruction>> _continueJmps = new();
 
         public V0_2Generator(SemanticResult semantic) => _semantic = semantic;
 
@@ -288,24 +289,22 @@ namespace Mint.CodeGenerators
             return writer.Result;
         }
 
-        private CodeWriter.CodeResult GenerateStatement(StmtNode statement)
+        private CodeWriter.CodeResult GenerateStatement(StmtNode statement) => statement switch
         {
-            return statement switch
-            {
-                VarDeclNode vd => GenerateVarDecl(vd),
-                AssignNode ass => GenerateAssign(ass),
-                IfNode ifNode => GenerateIf(ifNode),
-                WhileNode whileNode => whileNode.IsDoWhile ? GenerateDoWhile(whileNode) : GenerateWhile(whileNode),
-                ForNode forNode => GenerateFor(forNode),
-                ReturnNode returnNode => GenerateReturn(returnNode),
-                ExprStmtNode expr => GenerateExprStmt(expr),
-                YieldNode yield => GenerateYield(yield),
-                SwitchNode switchNode => GenerateSwitch(switchNode),
-                BreakNode breakNode => GenerateBreak(breakNode),
+            VarDeclNode vd => GenerateVarDecl(vd),
+            AssignNode ass => GenerateAssign(ass),
+            IfNode ifNode => GenerateIf(ifNode),
+            WhileNode whileNode => whileNode.IsDoWhile ? GenerateDoWhile(whileNode) : GenerateWhile(whileNode),
+            ForNode forNode => GenerateFor(forNode),
+            ReturnNode returnNode => GenerateReturn(returnNode),
+            ExprStmtNode expr => GenerateExprStmt(expr),
+            YieldNode yield => GenerateYield(yield),
+            SwitchNode switchNode => GenerateSwitch(switchNode),
+            BreakNode breakNode => GenerateBreak(breakNode),
+            ContinueNode continueNode => GenerateContinue(continueNode),
 
-                _ => throw new NotImplementedException("Unknown statement type.")
-            };
-        }
+            _ => throw new NotImplementedException("Unknown statement type for this version.")
+        };
 
         protected CodeWriter.CodeResult GenerateVarDecl(VarDeclNode varDecl)
         {
@@ -468,6 +467,7 @@ namespace Mint.CodeGenerators
         {
             CodeWriter writer = new();
             _breakJmps.Push(new());
+            _continueJmps.Push(new());
 
             byte condReg = _registers.AllocateRegister();
             writer.Append(GenerateExpr(whileNode.Condition, condReg));
@@ -490,6 +490,7 @@ namespace Mint.CodeGenerators
             writer.Instructions[jmpnegInstructionPos] = jmpnegInstr with { X = vBytes.Item1, Y = vBytes.Item2 };
 
             SetBreakJumpsV(writer);
+            SetContinueJumpsV(writer, 0);
             return writer.Result;
         }
 
@@ -497,9 +498,11 @@ namespace Mint.CodeGenerators
         {
             CodeWriter writer = new();
             _breakJmps.Push(new());
+            _continueJmps.Push(new());
 
             writer.Append(GenerateBlock(whileNode.Body));
 
+            int condPos = writer.Instructions.Count;
             byte condReg = _registers.AllocateRegister();
             writer.Append(GenerateExpr(whileNode.Condition, condReg));
             short endJmpLength = (short)(-writer.Instructions.Count);
@@ -508,6 +511,7 @@ namespace Mint.CodeGenerators
             writer.Append(GenerateFreeRegister(condReg));
 
             SetBreakJumpsV(writer);
+            SetContinueJumpsV(writer, condPos);
             return writer.Result;
         }
 
@@ -515,6 +519,7 @@ namespace Mint.CodeGenerators
         {
             CodeWriter writer = new();
             _breakJmps.Push(new());
+            _continueJmps.Push(new());
 
             writer.Append(GenerateStatement(forNode.Initializer));
 
@@ -530,6 +535,7 @@ namespace Mint.CodeGenerators
             CodeWriter.CodeResult bodyBlock = GenerateBlock(forNode.Body);
             writer.Append(bodyBlock);
 
+            int incIdx = writer.Instructions.Count;
             CodeWriter.CodeResult incBlock = GenerateStatement(forNode.Increment);
             writer.Append(incBlock);
 
@@ -542,6 +548,7 @@ namespace Mint.CodeGenerators
             writer.Instructions[condJmpPos] = condJmpInstr with { X = vBytes.Item1, Y = vBytes.Item2 };
 
             SetBreakJumpsV(writer);
+            SetContinueJumpsV(writer, incIdx);
             return writer.Result;
         }
 
@@ -659,6 +666,17 @@ namespace Mint.CodeGenerators
             Instruction breakJmp = new(GetOpcode("jmp")); // prepare the jump for later
             _breakJmps.Peek().Add(breakJmp);
             writer.Instructions.Add(breakJmp);
+
+            return writer.Result;
+        }
+
+        protected CodeWriter.CodeResult GenerateContinue(ContinueNode continueNode)
+        {
+            CodeWriter writer = new();
+
+            Instruction continueJmp = new(GetOpcode("jmp"));
+            _continueJmps.Peek().Add(continueJmp);
+            writer.Instructions.Add(continueJmp);
 
             return writer.Result;
         }
@@ -1576,11 +1594,23 @@ namespace Mint.CodeGenerators
         {
             foreach (Instruction breakJmp in _breakJmps.Pop())
             {
-                int breakJmpIdx = writer.Instructions.IndexOf(breakJmp);
+                int breakJmpIdx = writer.Instructions.FindIndex(x => ReferenceEquals(x, breakJmp));
 
                 short breakJmpLength = (short)(writer.Instructions.Count - breakJmpIdx);
                 (byte, byte) vBytes = CodeWriter.ToBytes(breakJmpLength);
                 writer.Instructions[breakJmpIdx] = breakJmp with { X = vBytes.Item1, Y = vBytes.Item2 };
+            }
+        }
+
+        protected void SetContinueJumpsV(CodeWriter writer, int restartIdx)
+        {
+            foreach (Instruction continueJmp in _continueJmps.Pop())
+            {
+                int continueJmpIdx = writer.Instructions.FindIndex(x => ReferenceEquals(x, continueJmp));
+
+                short continueJmpLength = (short)(restartIdx - continueJmpIdx);
+                (byte, byte) vBytes = CodeWriter.ToBytes(continueJmpLength);
+                writer.Instructions[continueJmpIdx] = continueJmp with { X = vBytes.Item1, Y = vBytes.Item2 };
             }
         }
 

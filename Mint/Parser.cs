@@ -477,6 +477,9 @@ namespace Mint
             if (Check(TokenType.Break))
                 return ParseBreak();
 
+            if (Check(TokenType.Continue))
+                return ParseContinue();
+
             // Var declaration
             if (IsVarDecl())
                 return ParseVarDecl();
@@ -671,6 +674,15 @@ namespace Mint
             Expect(TokenType.Break);
             Expect(TokenType.Semicolon);
             return new BreakNode(line, col);
+        }
+
+        private ContinueNode ParseContinue()
+        {
+            var (line, col) = CurrentPosition;
+
+            Expect(TokenType.Continue);
+            Expect(TokenType.Semicolon);
+            return new ContinueNode(line, col);
         }
 
         private VarDeclNode ParseVarDecl()

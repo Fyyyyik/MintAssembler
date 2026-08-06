@@ -57,6 +57,7 @@ namespace Mint
             ["case"]      = TokenType.Case,
             ["default"]   = TokenType.Default,
             ["break"]     = TokenType.Break,
+            ["continue"]  = TokenType.Continue,
             ["true"]      = TokenType.BoolLiteral,
             ["false"]     = TokenType.BoolLiteral
         };

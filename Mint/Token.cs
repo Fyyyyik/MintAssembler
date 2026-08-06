@@ -47,6 +47,7 @@ namespace Mint
         Case,
         Default,
         Break,
+        Continue,
 
         // Types, the basic ones (could also be Identifiers, resolve those later)
         Void,

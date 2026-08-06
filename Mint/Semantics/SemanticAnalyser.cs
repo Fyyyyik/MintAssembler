@@ -20,6 +20,7 @@ namespace Mint.Semantics
         private FunctionSymbol? _currentFunction;
         private readonly ScopeStack _scopeStack = new();
         private readonly Stack<IBreakable> _currentBreakables = new();
+        private readonly Stack<IContinuable> _currentContinuables = new();
 
         public SemanticAnalyser(VersionRules rules) => _rules = rules;
 
@@ -279,7 +280,9 @@ namespace Mint.Semantics
                         AddError("While condition must be a bool", whileStmt);
 
                     _currentBreakables.Push(whileStmt);
+                    _currentContinuables.Push(whileStmt);
                     AnalyseBlock(whileStmt.Body);
+                    _currentContinuables.Pop();
                     _currentBreakables.Pop();
                     break;
 
@@ -291,7 +294,9 @@ namespace Mint.Semantics
                     AnalyseStatement(forStmt.Increment);
 
                     _currentBreakables.Push(forStmt);
+                    _currentContinuables.Push(forStmt);
                     AnalyseBlock(forStmt.Body);
+                    _currentContinuables.Pop();
                     _currentBreakables.Pop();
                     break;
 
@@ -373,11 +378,13 @@ namespace Mint.Semantics
                     break;
 
                 case BreakNode breakNode:
-                    if (!_currentBreakables.TryPeek(out IBreakable? loop))
-                    {
-                        AddError("No enclosing loop to break out of.", breakNode);
-                        break;
-                    }
+                    if (_currentBreakables.Count == 0)
+                        AddError("No enclosing breakable statement to break out of.", breakNode);
+                    break;
+
+                case ContinueNode continueNode:
+                    if (_currentContinuables.Count == 0)
+                        AddError("No enclosing continuable statement to continue in.", continueNode);
                     break;
             }
         }

@@ -5,6 +5,7 @@ using System.Text;
 namespace Mint.AstNodes
 {
     public interface IBreakable;
+    public interface IContinuable;
 
     public abstract record StmtNode(int Line, int Column) : AstNode(Line, Column);
 
@@ -40,7 +41,7 @@ namespace Mint.AstNodes
         bool IsDoWhile,
         int Line,
         int Column
-    ) : StmtNode(Line, Column), IBreakable;
+    ) : StmtNode(Line, Column), IBreakable, IContinuable;
 
     public record ForNode(
         StmtNode Initializer,
@@ -49,7 +50,7 @@ namespace Mint.AstNodes
         BlockNode Body,
         int Line,
         int Column
-    ) : StmtNode(Line, Column), IBreakable;
+    ) : StmtNode(Line, Column), IBreakable, IContinuable;
 
     public record ReturnNode(ExprNode? Value, int Line, int Column) : StmtNode(Line, Column);
 
@@ -66,4 +67,6 @@ namespace Mint.AstNodes
     ) : StmtNode(Line, Column), IBreakable;
 
     public record BreakNode(int Line, int Column) : StmtNode(Line, Column);
+
+    public record ContinueNode(int Line, int Column) : StmtNode(Line, Column);
 }
