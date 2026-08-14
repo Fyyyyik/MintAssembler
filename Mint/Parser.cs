@@ -5,6 +5,8 @@ using System.Collections.Generic;
 using System.Reflection.Metadata.Ecma335;
 using System.Text;
 using System.Xml.Linq;
+using OneOf;
+using System.ComponentModel.Design;
 
 namespace Mint
 {
@@ -16,6 +18,7 @@ namespace Mint
         private readonly List<Token> _tokens;
         private readonly FileInfo? _file;
         private readonly bool _isInclude;
+
         private int _pos;
         private bool _foundThis;
 
@@ -29,8 +32,6 @@ namespace Mint
         }
 
         private (int Line, int Column) CurrentPosition => (Current.Line, Current.Column);
-
-        private bool IsObjectToken => Current.Type is TokenType.Object;
 
         private bool IsTypeToken => Current.Type is TokenType.Int or
                                                     TokenType.Float or
@@ -98,7 +99,7 @@ namespace Mint
                 Expect(TokenType.Semicolon);
             }
 
-            List<ObjectNode> objects = new();
+            List<ObjectBaseNode> objects = new();
             while (!Check(TokenType.EOF))
             {
                 var (line, col) = CurrentPosition;
@@ -108,14 +109,17 @@ namespace Mint
                 else if (Check(TokenType.Include))
                     objects.AddRange(ParseInclude());
                 else
-                    objects.Add(ParseObject());
+                {
+                    objects.Add(ParseObjectOrEnum(out List<EnumNode> enums));
+                    objects.AddRange(enums);
+                }
             }
 
             return new ModuleNode(fullName, objects, 0, 0);
         }
 
         // the compiler doesn't actually care about namespaces, only the objects and their full name
-        private List<ObjectNode> ParseNamespace(string currentName = "")
+        private List<ObjectBaseNode> ParseNamespace(string currentName = "")
         {
             var (line, col) = CurrentPosition;
 
@@ -127,17 +131,25 @@ namespace Mint
                 fullName = ReadFullName();
             Expect(TokenType.OpenBrace);
 
-            List<ObjectNode> objects = new();
+            List<ObjectBaseNode> objects = new();
             while (!Check(TokenType.EOF) && !Check(TokenType.CloseBrace))
             {
-                var (nameLine, nameCol) = CurrentPosition;
+                var (objLine, objCol) = CurrentPosition;
 
                 if (Check(TokenType.Namespace))
                     objects.AddRange(ParseNamespace(fullName));
                 else
                 {
-                    ObjectNode newObj = ParseObject();
-                    objects.Add(newObj with { Name = $"{fullName}.{newObj.Name}" });
+                    ObjectBaseNode newObjBase = ParseObjectOrEnum(out List<EnumNode> enums);
+                    objects.AddRange(enums);
+                    if (newObjBase.Location == ObjectLocation.Local)
+                        throw new ParserException(
+                            $"Object with name '{newObjBase}' in namespace '{fullName}' has been declared to be local. " +
+                            $"It is strictly forbidden to declare local objects in a namespace, use the 'mint' or 'extern' keyword.",
+                            objLine,
+                            objCol
+                        );
+                    objects.Add(newObjBase with { Name = $"{fullName}.{newObjBase.Name}" });
                 }
             }
             Expect(TokenType.CloseBrace);
@@ -145,7 +157,7 @@ namespace Mint
             return objects;
         }
 
-        private List<ObjectNode> ParseInclude()
+        private List<ObjectBaseNode> ParseInclude()
         {
             var (line, col) = CurrentPosition;
 
@@ -191,7 +203,7 @@ namespace Mint
             return new Parser(new Lexer(headerContent).Tokenize(), new FileInfo(headerPath), true).Parse().Objects;
         }
 
-        private ObjectNode ParseObject()
+        private ObjectBaseNode ParseObjectOrEnum(out List<EnumNode> enums)
         {
             var (line, col) = CurrentPosition;
 
@@ -212,30 +224,83 @@ namespace Mint
                     _pos++;
                     break;
             }
+
+            enums = new();
+            if (Check(TokenType.Enum))
+                return ParseEnum(loc, line, col);
+            else
+                return ParseObject(loc, line, col, out enums);
+        }
+
+        private ObjectNode ParseObject(ObjectLocation loc, int line, int col, out List<EnumNode> enums)
+        {
             bool isLoc = loc == ObjectLocation.Local;
 
-            (line, col) = CurrentPosition;
             ObjectType type = CurrentObjectType;
             _pos++;
 
             string name = string.Empty;
             if (isLoc)
-            {
-                name = Expect(TokenType.Identifier).Value;
-                if (_isInclude)
-                    throw new ParserException($"Object '{name}' from include file '{_file?.FullName}' cannot be set to 'local'.", line, col);
-            }
+                name = ReadLocalName(line, col);
             else
                 name = ReadFullName();
             Expect(TokenType.OpenBrace);
 
             List<MemberNode> members = new();
+            enums = new();
             while (!Check(TokenType.CloseBrace) && !Check(TokenType.EOF))
+            {
+                // Check for an enum inside an object
+                var (objLine, objCol) = CurrentPosition;
+                if (Check(TokenType.Enum))
+                {
+                    EnumNode enumNode = ParseEnum(loc, objLine, objCol);
+                    enums.Add(enumNode with { Name = $"{name}.{enumNode.Name}" });
+                    continue;
+                }
+
                 members.Add(ParseMember(isLoc));
+            }
 
             Expect(TokenType.CloseBrace);
 
             return new ObjectNode(name, members, loc, type, line, col);
+        }
+
+        private EnumNode ParseEnum(ObjectLocation loc, int line, int col)
+        {
+            string name;
+            if (loc == ObjectLocation.Local)
+                name = ReadLocalName(line, col);
+            else
+                name = ReadFullName();
+            Expect(TokenType.OpenBrace);
+
+            List<MintEnum> elements = new();
+            while (!Check(TokenType.CloseBrace) && !Check(TokenType.EOF))
+            {
+                string eleName = Expect(TokenType.Identifier).Value;
+                
+                Expect(TokenType.Equals);
+
+                ExprNode valueNode = ParsePrimary();
+                if (valueNode is not IntLiteralNode intLiteral)
+                    throw new ParserException($"Value for element '{eleName}' of enum '{name}' needs to be an int literal.", line, col);
+                elements.Add(new MintEnum(eleName, intLiteral.Value));
+
+                if (!Match(TokenType.Comma)) break;
+            }
+            Expect(TokenType.CloseBrace);
+
+            return new EnumNode(name, elements, loc, line, col);
+        }
+
+        private string ReadLocalName(int line, int col)
+        {
+            string name = Expect(TokenType.Identifier).Value;
+            if (_isInclude)
+                throw new ParserException($"Object '{name}' from include file '{_file?.FullName}' cannot be set to 'local'.", line, col);
+            return name;
         }
 
         private ObjectType CurrentObjectType => Current.Type switch

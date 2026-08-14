@@ -46,89 +46,101 @@ namespace Mint.Semantics
         private void BuildSymbolTable(ModuleNode module)
         {
             _module = new() { Name = module.FullName };
-            foreach (ObjectNode obj in module.Objects)
+            foreach (ObjectBaseNode objBase in module.Objects)
             {
-                if (obj.Location == ObjectLocation.Local)
+                if (objBase is EnumNode enumNode)
                 {
-                    ObjectSymbol objSbl = new()
+                    EnumSymbol enumSbl = new()
                     {
-                        FullName = GetFullObjectName(obj.Name)
+                        Name = enumNode.Location == ObjectLocation.Local ? GetFullObjectName(enumNode.Name) : enumNode.Name
                     };
-
-                    foreach (MemberNode member in obj.Members)
-                        switch (member)
-                        {
-                            case VariableNode varNode:
-                                objSbl.Variables.Add(varNode.Name, new VariableSymbol()
-                                {
-                                    Name = varNode.Name,
-                                    Type = varNode.Type
-                                });
-                                break;
-                            case FunctionNode funcNode:
-                                FunctionSymbol funcSbl = new()
-                                {
-                                    Name = funcNode.Name,
-                                    ReturnType = funcNode.ReturnType,
-                                    HasThis = funcNode.HasThis
-                                };
-                                funcSbl.Parameters.AddRange(funcNode.Params);
-                                objSbl.Functions.Add(funcSbl);
-                                break;
-                            case ConstructorNode ctNode:
-                                ConstructorSymbol ctSbl = new();
-                                ctSbl.Parameters.AddRange(ctNode.Params);
-                                objSbl.Constructors.Add(ctSbl);
-                                break;
-                        }
-                    _module.LocalObjects.Add(obj.Name, objSbl);
+                    enumSbl.Elements.AddRange(enumNode.Elements);
                 }
-                else
+                else if (objBase is ObjectNode obj)
                 {
-                    XRefSymbol xrefSbl = new()
+                    if (objBase.Location == ObjectLocation.Local)
                     {
-                        FullName = obj.Name
-                    };
-
-                    foreach (MemberNode member in obj.Members)
-                        switch (member)
+                        ObjectSymbol objSbl = new()
                         {
-                            case VariableNode varNode:
-                                xrefSbl.Variables.Add(varNode.Name, new VariableSymbol()
-                                {
-                                    Name = varNode.Name,
-                                    Type = varNode.Type
-                                });
-                                break;
-                            case ExternalFunctionNode xrefFuncNode:
-                                XRefFunctionSymbol xrefFuncSbl = new()
-                                {
-                                    Name = xrefFuncNode.Name,
-                                    ReturnType = xrefFuncNode.ReturnType
-                                };
-                                xrefFuncSbl.ArgumentTypes.AddRange(xrefFuncNode.ParamTypes);
-                                xrefSbl.Functions.Add(xrefFuncSbl);
-                                break;
-                            case ExternalConstructorNode xrefCtNode:
-                                XRefConstructorSymbol xrefCtSbl = new();
-                                xrefCtSbl.ArgumentTypes.AddRange(xrefCtNode.ParamTypes);
-                                xrefSbl.Constructors.Add(xrefCtSbl);
-                                break;
-                        }
-                    if (_module.XRefObjects.TryGetValue(obj.Name, out XRefSymbol? preXRefSbl))
-                    {
-                        foreach (KeyValuePair<string, VariableSymbol> varSbl in xrefSbl.Variables)
-                            if (!preXRefSbl.Variables.ContainsKey(varSbl.Key))
-                                preXRefSbl.Variables.Add(varSbl.Key, varSbl.Value);
-                        foreach (XRefFunctionSymbol xrefFuncSbl in xrefSbl.Functions)
-                            if (!preXRefSbl.FindFunction(xrefFuncSbl.Name, xrefFuncSbl.ArgumentTypes, out _))
-                                preXRefSbl.Functions.Add(xrefFuncSbl);
-                        foreach (XRefConstructorSymbol xrefCtSbl in xrefSbl.Constructors)
-                            if (!preXRefSbl.FindConstructor(xrefCtSbl.ArgumentTypes, out _))
-                                preXRefSbl.Constructors.Add(xrefCtSbl);
+                            FullName = GetFullObjectName(objBase.Name)
+                        };
+
+                        foreach (MemberNode member in obj.Members)
+                            switch (member)
+                            {
+                                case VariableNode varNode:
+                                    objSbl.Variables.Add(varNode.Name, new VariableSymbol()
+                                    {
+                                        Name = varNode.Name,
+                                        Type = varNode.Type
+                                    });
+                                    break;
+                                case FunctionNode funcNode:
+                                    FunctionSymbol funcSbl = new()
+                                    {
+                                        Name = funcNode.Name,
+                                        ReturnType = funcNode.ReturnType,
+                                        HasThis = funcNode.HasThis
+                                    };
+                                    funcSbl.Parameters.AddRange(funcNode.Params);
+                                    objSbl.Functions.Add(funcSbl);
+                                    break;
+                                case ConstructorNode ctNode:
+                                    ConstructorSymbol ctSbl = new();
+                                    ctSbl.Parameters.AddRange(ctNode.Params);
+                                    objSbl.Constructors.Add(ctSbl);
+                                    break;
+                            }
+                        _module.LocalObjects.Add(obj.Name, objSbl);
                     }
-                    else _module.XRefObjects.Add(obj.Name, xrefSbl);
+                    else
+                    {
+                        XRefSymbol xrefSbl = new()
+                        {
+                            FullName = obj.Name
+                        };
+
+                        foreach (MemberNode member in obj.Members)
+                            switch (member)
+                            {
+                                case VariableNode varNode:
+                                    xrefSbl.Variables.Add(varNode.Name, new VariableSymbol()
+                                    {
+                                        Name = varNode.Name,
+                                        Type = varNode.Type
+                                    });
+                                    break;
+                                case ExternalFunctionNode xrefFuncNode:
+                                    XRefFunctionSymbol xrefFuncSbl = new()
+                                    {
+                                        Name = xrefFuncNode.Name,
+                                        ReturnType = xrefFuncNode.ReturnType
+                                    };
+                                    xrefFuncSbl.ArgumentTypes.AddRange(xrefFuncNode.ParamTypes);
+                                    xrefSbl.Functions.Add(xrefFuncSbl);
+                                    break;
+                                case ExternalConstructorNode xrefCtNode:
+                                    XRefConstructorSymbol xrefCtSbl = new();
+                                    xrefCtSbl.ArgumentTypes.AddRange(xrefCtNode.ParamTypes);
+                                    xrefSbl.Constructors.Add(xrefCtSbl);
+                                    break;
+                            }
+                        if (_module.XRefObjects.TryGetValue(obj.Name, out XRefSymbol? preXRefSbl))
+                        {
+                            foreach (KeyValuePair<string, VariableSymbol> varSbl in xrefSbl.Variables)
+                                if (!preXRefSbl.Variables.ContainsKey(varSbl.Key))
+                                    preXRefSbl.Variables.Add(varSbl.Key, varSbl.Value);
+                            foreach (XRefFunctionSymbol xrefFuncSbl in xrefSbl.Functions)
+                                if (!preXRefSbl.FindFunction(xrefFuncSbl.Name, xrefFuncSbl.ArgumentTypes, out _))
+                                    preXRefSbl.Functions.Add(xrefFuncSbl);
+                            foreach (XRefConstructorSymbol xrefCtSbl in xrefSbl.Constructors)
+                                if (!preXRefSbl.FindConstructor(xrefCtSbl.ArgumentTypes, out _))
+                                    preXRefSbl.Constructors.Add(xrefCtSbl);
+                        }
+                        else _module.XRefObjects.Add(obj.Name, xrefSbl);
+                    }
                 }
+                else throw new NotImplementedException($"Could not build symbols for '{objBase.Name}'. Unknown object type.");
             }
         }
 

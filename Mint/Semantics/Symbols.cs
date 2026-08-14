@@ -1,4 +1,5 @@
-﻿using Mint.AstNodes;
+﻿using KirbyLib.Mint;
+using Mint.AstNodes;
 using System.Diagnostics.CodeAnalysis;
 
 namespace Mint.Semantics
@@ -12,6 +13,7 @@ namespace Mint.Semantics
         public required string Name { get; init; }
         public Dictionary<string, ObjectSymbol> LocalObjects { get; } = new();
         public Dictionary<string, XRefSymbol> XRefObjects { get; } = new();
+        public Dictionary<string, EnumSymbol> Enums { get; } = new();
     }
 
     public record ObjectSymbol
@@ -127,6 +129,12 @@ namespace Mint.Semantics
             ctSbl = null;
             return false;
         }
+    }
+
+    public record EnumSymbol
+    {
+        public required string Name { get; init; }
+        public List<MintEnum> Elements { get; } = new();
     }
 
     // Used for local and external references since external vars don't have different info

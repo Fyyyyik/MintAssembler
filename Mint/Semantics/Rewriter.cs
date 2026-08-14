@@ -23,12 +23,19 @@ namespace Mint.Semantics
 
         public ModuleNode Rewrite(ModuleNode module)
         {
-            List<ObjectNode> rewrittenObjs = new();
-            foreach (ObjectNode obj in module.Objects)
-                rewrittenObjs.Add(RewriteObject(obj));
+            List<ObjectBaseNode> rewrittenObjs = new();
+            foreach (ObjectBaseNode objBase in module.Objects)
+                rewrittenObjs.Add(RewriteObjectBase(objBase));
 
             return module with { Objects = rewrittenObjs };
         }
+
+        private ObjectBaseNode RewriteObjectBase(ObjectBaseNode objBase) => objBase switch
+        {
+            ObjectNode obj => RewriteObject(obj),
+
+            _ => objBase
+        };
 
         private ObjectNode RewriteObject(ObjectNode obj)
         {
