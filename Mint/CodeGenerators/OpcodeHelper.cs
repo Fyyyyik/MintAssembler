@@ -8,6 +8,14 @@ namespace Mint.CodeGenerators
 {
     public static class OpcodeHelper
     {
+        [Flags]
+        public enum FEnterFlags : byte
+        {
+            None = 0,
+            Member = 1,
+            Return = 2
+        }
+
         public static readonly Dictionary<byte[], Dictionary<string, byte>> OpcodeByName = new(new ByteArrayComparer())
         {
             {
@@ -69,9 +77,24 @@ namespace Mint.CodeGenerators
                     { "sppop", 0x3C },
                     { "addofs", 0x3D },
                     { "arpshz", 0x3E },
-                    { "arirx", 0x3F },
+                    { "aridx", 0x3F },
                     { "arlen", 0x40 },
                     { "arpop", 0x41 }
+                }
+            },
+            {
+                new byte[] { 1, 0, 5, 0},
+                new Dictionary<string, byte>()
+                {
+                    { "ldsrsr", 0x05 },
+                    { "ldfs3f", 0x09 },
+                    { "ldsrsv", 0x0C },
+                    { "stsrsr", 0x12 },
+                    { "inci32", 0x1D },
+                    { "fenter", 0x46 },
+                    { "fleave", 0x47 },
+                    { "fret", 0x48 },
+                    { "aridx", 0x55 }
                 }
             }
         };

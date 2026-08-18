@@ -40,8 +40,8 @@ namespace Mint.AstNodes
 
     public enum ObjectLocation
     {
-        Local,
-        Mint,
-        Extern
+        Local, // signifies that the compiler should compile it as it is in the module
+        Mint, // signifies that it is in mint but not in the same module
+        Extern // signifies that it is native to the executable and therefore cannot be found in mint
     }
 }

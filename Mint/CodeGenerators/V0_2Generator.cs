@@ -28,12 +28,11 @@ namespace Mint.CodeGenerators
         protected RegisterManager _registers = new();
         protected readonly SemanticResult _semantic;
 
-        private readonly List<byte> _sdata = new();
-        private readonly List<string> _xrefs = new();
+        protected readonly List<byte> _sdata = new();
+        protected readonly List<string> _xrefs = new();
 
-        private ObjectSymbol? _currentObj = null;
-        private FunctionSymbol? _currentFunction = null;
-        private IBreakable? _currentBreakable = null;
+        protected ObjectSymbol? _currentObj = null;
+        protected FunctionSymbol? _currentFunction = null;
 
         private HashSet<byte> _arrayRegs = new();
         private Dictionary<byte, string> _instanceRegs = new();
@@ -50,23 +49,30 @@ namespace Mint.CodeGenerators
                 Name = module.FullName
             };
 
-            foreach (ObjectNode obj in module.Objects)
-                if (obj.Location == ObjectLocation.Local)
-                    rtdl.Objects.Add(GenerateObject(obj));
+            foreach (ObjectBaseNode objBase in module.Objects)
+                if (objBase.Location == ObjectLocation.Local)
+                    rtdl.Objects.Add(GenerateObjectBase(objBase));
             
             rtdl.SData = _sdata;
             rtdl.XRef = _xrefs;
             return rtdl;
         }
 
-        private MintObject GenerateObject(ObjectNode obj)
+        protected virtual MintObject GenerateObjectBase(ObjectBaseNode objBase) => objBase switch
+        {
+            ObjectNode obj => GenerateObject(obj),
+
+            _ => throw new CodeGeneratorException($"Unexpected object type for local object '{objBase.Name}'.", objBase.Line, objBase.Column)
+        };
+
+        protected virtual MintObject GenerateObject(ObjectNode obj)
         {
             _currentObj = _semantic.Module.LocalObjects[obj.Name];
 
             MintObject mintObj = new()
             {
                 Name = _currentObj.FullName,
-                Type = ObjectType.Class // TODO : make obj carry the type over
+                Type = ObjectType.Class
             };
 
             List<VariableNode> varList = new();
@@ -88,7 +94,7 @@ namespace Mint.CodeGenerators
             return mintObj;
         }
 
-        private MintFunction GenerateVarInit(VariableNode[] varNodes)
+        protected MintFunction GenerateVarInit(VariableNode[] varNodes)
         {
             _registers = new();
             _registers.PushNewBlock();
@@ -99,85 +105,18 @@ namespace Mint.CodeGenerators
             {
                 if (varNode.Initializer == null) continue;
 
-                ushort v;
-                (byte, byte) vBytes;
                 string varXRef = $"{_currentObj?.FullName}.{varNode.Name}";
-                switch (varNode.Initializer)
+                writer.Append(varNode.Initializer switch
                 {
-                    case ArrayInitNode arrayInit:
-                        byte arrReg = _registers.AllocateRegister();
-                        v = (ushort)AddOrGetXRef(varXRef);
-                        vBytes = CodeWriter.ToBytes(v);
-                        writer.Instructions.Add(new Instruction(GetOpcode("ldsrsv"), arrReg, vBytes.Item1, vBytes.Item2));
+                    ArrayInitNode ai => GenerateArrayInitVarInit(ai, varXRef),
+                    PushInstanceNode pi => GeneratePushInstanceVarInit(pi, varXRef),
 
-                        byte idxReg = _registers.AllocateRegister();
-                        writer.Append(GenerateIntLiteral(new IntLiteralNode(0, 0, 0), idxReg));
-
-                        foreach (ExprNode init in arrayInit.Initializers)
-                        {
-                            byte valReg = _registers.AllocateRegister();
-                            writer.Append(GenerateExpr(init, valReg));
-
-                            byte cpyReg = _registers.AllocateRegister();
-                            writer.Instructions.Add(new Instruction(GetOpcode("ldsrsr"), cpyReg, arrReg));
-
-                            writer.Instructions.Add(new Instruction(GetOpcode("arirx"), cpyReg, idxReg));
-                            writer.Instructions.Add(new Instruction(GetOpcode("stsrsr"), cpyReg, valReg));
-
-                            writer.Append(GenerateFreeRegister(valReg));
-                            writer.Append(GenerateFreeRegister(cpyReg));
-
-                            writer.Instructions.Add(new Instruction(GetOpcode("inci32"), idxReg));
-                        }
-
-                        _registers.FreeRegister(arrReg);
-                        _registers.FreeRegister(idxReg);
-                        break;
-
-                    case PushInstanceNode pushInstance:
-                        if (pushInstance.CtArgs == null) break;
-
-                        byte instReg = _registers.AllocateRegister();
-                        v = (ushort)AddOrGetXRef(varXRef);
-                        vBytes = CodeWriter.ToBytes(v);
-                        writer.Instructions.Add(new Instruction(GetOpcode("ldsrsv"), instReg, vBytes.Item1, vBytes.Item2));
-
-                        List<byte> regs = new();
-                        foreach (ExprNode expr in pushInstance.CtArgs)
-                        {
-                            regs.Add(_registers.AllocateRegister());
-                            writer.Append(GenerateExpr(expr, regs[^1]));
-                        }
-
-                        writer.Instructions.Add(new Instruction(GetOpcode("ldfrsr"), 0, instReg));
-                        for (int i = 0; i < regs.Count; i++)
-                            writer.Instructions.Add(new Instruction(GetOpcode("ldfrsr"), (byte)(i + 1), regs[i]));
-
-                        v = (ushort)AddOrGetXRef($"{pushInstance.ObjectName}.this{CreateCallParamTypes(pushInstance)}");
-                        vBytes = CodeWriter.ToBytes(v);
-                        writer.Instructions.Add(new Instruction(GetOpcode("call"), 0xFF, vBytes.Item1, vBytes.Item2));
-
-                        foreach (byte reg in regs)
-                            writer.Append(GenerateFreeRegister(reg));
-
-                        _registers.FreeRegister(instReg);
-                        break;
-
-                    default:
-                        byte initReg = _registers.AllocateRegister();
-                        writer.Append(GenerateExpr(varNode.Initializer, initReg));
-
-                        v = (ushort)AddOrGetXRef(varXRef);
-                        vBytes = CodeWriter.ToBytes(v);
-                        writer.Instructions.Add(new Instruction(GetOpcode("stsvsr"), initReg, vBytes.Item1, vBytes.Item2));
-
-                        writer.Append(GenerateFreeRegister(initReg));
-                        break;
-                }
+                    _ => GenerateDefaultVarInit(varNode.Initializer, varXRef)
+                });
             }
 
             writer.Instructions.Add(new Instruction(GetOpcode("fleave")));
-            writer.Instructions.Insert(0, new Instruction(GetOpcode("fenter"), _registers.RegisterCount, 0));
+            writer.Instructions.Insert(0, BasicFEnter);
 
             return new MintFunction("void __Init()")
             {
@@ -185,7 +124,91 @@ namespace Mint.CodeGenerators
             };
         }
 
-        private MintFunction GenerateFunction(FunctionNode funcNode)
+        protected virtual Instruction BasicFEnter => new Instruction(GetOpcode("fenter"), _registers.RegisterCount, 0);
+
+        protected virtual CodeWriter.CodeResult GenerateArrayInitVarInit(ArrayInitNode arrayInit, string varXRef)
+        {
+            CodeWriter writer = new();
+
+            byte arrReg = _registers.AllocateRegister();
+            ushort v = (ushort)AddOrGetXRef(varXRef);
+            (byte, byte) vBytes = CodeWriter.ToBytes(v);
+            writer.Instructions.Add(new Instruction(GetOpcode("ldsrsv"), arrReg, vBytes.Item1, vBytes.Item2));
+
+            byte idxReg = _registers.AllocateRegister();
+            writer.Append(GenerateIntLiteral(new IntLiteralNode(0, 0, 0), idxReg));
+
+            foreach (ExprNode init in arrayInit.Initializers)
+            {
+                byte valReg = _registers.AllocateRegister();
+                writer.Append(GenerateExpr(init, valReg));
+
+                byte cpyReg = _registers.AllocateRegister();
+                writer.Instructions.Add(new Instruction(GetOpcode("ldsrsr"), cpyReg, arrReg));
+
+                writer.Instructions.Add(new Instruction(GetOpcode("aridx"), cpyReg, idxReg));
+                writer.Instructions.Add(new Instruction(GetOpcode("stsrsr"), cpyReg, valReg));
+
+                writer.Append(GenerateFreeRegister(valReg));
+                writer.Append(GenerateFreeRegister(cpyReg));
+
+                writer.Instructions.Add(new Instruction(GetOpcode("inci32"), idxReg));
+            }
+
+            _registers.FreeRegister(arrReg);
+            _registers.FreeRegister(idxReg);
+            return writer.Result;
+        }
+
+        protected virtual CodeWriter.CodeResult GeneratePushInstanceVarInit(PushInstanceNode pushInstance, string varXRef)
+        {
+            CodeWriter writer = new();
+
+            if (pushInstance.CtArgs == null) return writer.Result;
+
+            byte instReg = _registers.AllocateRegister();
+            ushort v = (ushort)AddOrGetXRef(varXRef);
+            (byte, byte) vBytes = CodeWriter.ToBytes(v);
+            writer.Instructions.Add(new Instruction(GetOpcode("ldsrsv"), instReg, vBytes.Item1, vBytes.Item2));
+
+            List<byte> regs = new();
+            foreach (ExprNode expr in pushInstance.CtArgs)
+            {
+                regs.Add(_registers.AllocateRegister());
+                writer.Append(GenerateExpr(expr, regs[^1]));
+            }
+
+            writer.Instructions.Add(new Instruction(GetOpcode("ldfrsr"), 0, instReg));
+            for (int i = 0; i < regs.Count; i++)
+                writer.Instructions.Add(new Instruction(GetOpcode("ldfrsr"), (byte)(i + 1), regs[i]));
+
+            v = (ushort)AddOrGetXRef($"{pushInstance.ObjectName}.{GetFuncSymbol(pushInstance).GetSignature()}");
+            vBytes = CodeWriter.ToBytes(v);
+            writer.Instructions.Add(new Instruction(GetOpcode("call"), 0xFF, vBytes.Item1, vBytes.Item2));
+
+            foreach (byte reg in regs)
+                writer.Append(GenerateFreeRegister(reg));
+
+            _registers.FreeRegister(instReg);
+            return writer.Result;
+        }
+
+        protected virtual CodeWriter.CodeResult GenerateDefaultVarInit(ExprNode initExpr, string varXRef)
+        {
+            CodeWriter writer = new();
+
+            byte initReg = _registers.AllocateRegister();
+            writer.Append(GenerateExpr(initExpr, initReg));
+
+            ushort v = (ushort)AddOrGetXRef(varXRef);
+            (byte, byte) vBytes = CodeWriter.ToBytes(v);
+            writer.Instructions.Add(new Instruction(GetOpcode("stsvsr"), initReg, vBytes.Item1, vBytes.Item2));
+
+            writer.Append(GenerateFreeRegister(initReg));
+            return writer.Result;
+        }
+
+        protected MintFunction GenerateFunction(FunctionNode funcNode)
         {
             if (_currentObj == null)
                 throw new CodeGeneratorException("Cannot generate function outside of an object.", funcNode.Line, funcNode.Column);
@@ -249,7 +272,7 @@ namespace Mint.CodeGenerators
             return writer.Result;
         }
 
-        protected CodeWriter.CodeResult GenerateFunctionEnter()
+        protected virtual CodeWriter.CodeResult GenerateFunctionEnter()
         {
             if (_currentFunction == null)
                 throw new CodeGeneratorException( // This is mainly to shut up C#, this shouldn't ever happen
@@ -350,7 +373,7 @@ namespace Mint.CodeGenerators
             writer.Append(GenerateExpr(assign.Value, valReg));
 
             writer.Instructions.Add(new Instruction(GetOpcode("ldsrsr"), cpyReg, arrReg));
-            writer.Instructions.Add(new Instruction(GetOpcode("arirx"), cpyReg, idxReg));
+            writer.Instructions.Add(new Instruction(GetOpcode("aridx"), cpyReg, idxReg));
             writer.Instructions.Add(new Instruction(GetOpcode("stsrsr"), cpyReg, valReg));
 
             if (targetArray.Array is ArrayInitNode)
@@ -799,7 +822,7 @@ namespace Mint.CodeGenerators
             byte cpyReg = _registers.AllocateRegister();
             writer.Instructions.Add(new Instruction(GetOpcode("ldsrsr"), cpyReg, arrReg));
 
-            writer.Instructions.Add(new Instruction(GetOpcode("arirx"), cpyReg, idxReg));
+            writer.Instructions.Add(new Instruction(GetOpcode("aridx"), cpyReg, idxReg));
             writer.Instructions.Add(new Instruction(GetOpcode("ldsra4"), destRegister, cpyReg));
 
             if (arrayAccess.Array is not ArrayInitNode)
@@ -1010,7 +1033,7 @@ namespace Mint.CodeGenerators
             for (int i = 0; i < regs.Count; i++)
                 writer.Instructions.Add(new Instruction(GetOpcode("ldfrsr"), (byte)(isReturn ? i + 1 : i), regs[i]));
 
-            ushort v = (ushort)AddOrGetXRef(qualifiedCall.FullName + CreateCallParamTypes(qualifiedCall));
+            ushort v = (ushort)AddOrGetXRef(qualifiedCall.FullName + GetFuncSymbol(qualifiedCall).GetSignatureWithoutName());
             (byte, byte) vBytes = CodeWriter.ToBytes(v);
             writer.Instructions.Add(new Instruction(GetOpcode("call"), 0xFF, vBytes.Item1, vBytes.Item2));
 
@@ -1036,7 +1059,6 @@ namespace Mint.CodeGenerators
                     memberCall.Column
                 );
 
-            string fullName = $"{objType.GetBaseType().Name}.{memberCall.Name}";
             writer.Append(TryGenerateReturnInstanceSetup(GetFuncSymbol(memberCall), destRegister, out bool isReturn));
 
             byte objReg = _registers.AllocateRegister();
@@ -1061,7 +1083,7 @@ namespace Mint.CodeGenerators
                     regs[i]
                 ));
 
-            ushort v = (ushort)AddOrGetXRef($"{fullName}{CreateCallParamTypes(memberCall)}");
+            ushort v = (ushort)AddOrGetXRef($"{objType.GetBaseType().Name}.{GetFuncSymbol(memberCall).GetSignature()}");
             (byte, byte) vBytes = CodeWriter.ToBytes(v);
             writer.Instructions.Add(new Instruction(GetOpcode("call"), 0xFF, vBytes.Item1, vBytes.Item2));
 
@@ -1082,7 +1104,8 @@ namespace Mint.CodeGenerators
             CodeWriter writer = new();
 
             isReturn = false;
-            if (DoesFunctionReturn(callable, out ITypeNode? returnType))
+            ITypeNode? returnType = callable.GetReturnType();
+            if (returnType != null)
             {
                 isReturn = true;
                 TypeNode returnBaseType = returnType.GetBaseType();
@@ -1202,7 +1225,7 @@ namespace Mint.CodeGenerators
                 {
                     writer.Append(GenerateExpr(arrayInit.Initializers[i], initReg));
                     writer.Instructions.Add(new Instruction(GetOpcode("ldsrsr"), cpyReg, destRegister));
-                    writer.Instructions.Add(new Instruction(GetOpcode("arirx"), cpyReg, idxReg));
+                    writer.Instructions.Add(new Instruction(GetOpcode("aridx"), cpyReg, idxReg));
                     writer.Instructions.Add(new Instruction(GetOpcode("stsrsr"), cpyReg, initReg));
                     writer.Instructions.Add(new Instruction(GetOpcode("inci32"), idxReg));
                 }
@@ -1298,7 +1321,7 @@ namespace Mint.CodeGenerators
             byte cpyReg = _registers.AllocateRegister();
             writer.Instructions.Add(new Instruction(GetOpcode("ldsrsr"), cpyReg, arrReg));
 
-            writer.Instructions.Add(new Instruction(GetOpcode("arirx"), cpyReg, idxReg));
+            writer.Instructions.Add(new Instruction(GetOpcode("aridx"), cpyReg, idxReg));
             writer.Instructions.Add(new Instruction(GetOpcode("stsrsr"), cpyReg, valReg));
 
             if (array.Array is not ArrayInitNode)
@@ -1506,63 +1529,11 @@ namespace Mint.CodeGenerators
 
         protected byte GetOpcode(string name) => OpcodeHelper.OpcodeByName[Version][name];
 
-        protected bool DoesFunctionReturn(ICallable funcCalled, [NotNullWhen(true)] out ITypeNode? returnType)
-        {
-            bool isReturn = false;
-
-            if (funcCalled is FunctionSymbol funcSbl)
-            {
-                returnType = funcSbl.ReturnType;
-                isReturn = funcSbl.ReturnType != null;
-            }
-            else if (funcCalled is XRefFunctionSymbol xrefSbl)
-            {
-                returnType = xrefSbl.ReturnType;
-                isReturn = xrefSbl.ReturnType != null;
-            }
-            else if (funcCalled is ConstructorSymbol or XRefConstructorSymbol)
-            {
-                returnType = null;
-                isReturn = false;
-            }
-            else throw new NotImplementedException("Unknown callable type.");
-
-            return isReturn;
-        }
-
         protected ICallable GetFuncSymbol(ExprNode call)
         {
             if (_semantic.ExprCalls.TryGetValue(call, out ICallable? callable))
                 return callable;
             throw new CodeGeneratorException("Couldn't find function symbol from call expression.", call.Line, call.Column);
-        }
-
-        protected string CreateCallParamTypes(ExprNode call)
-        {
-            ICallable? callable = GetFuncSymbol(call);
-            if (callable == null)
-                throw new CodeGeneratorException($"Could not get function symbol from call expression.", call.Line, call.Column);
-
-            ITypeNode[] funcArgTypes;
-            if (callable is FunctionSymbol funcSbl)
-                funcArgTypes = Utility.ToTypeNodes(funcSbl.Parameters);
-            else if (callable is XRefFunctionSymbol xrefFuncSbl)
-                funcArgTypes = xrefFuncSbl.ArgumentTypes.ToArray();
-            else if (callable is ConstructorSymbol ctSbl)
-                funcArgTypes = Utility.ToTypeNodes(ctSbl.Parameters);
-            else if (callable is XRefConstructorSymbol xrefCtSbl)
-                funcArgTypes = xrefCtSbl.ArgumentTypes.ToArray();
-            else throw new NotImplementedException("Unknown callable type.");
-
-            StringBuilder sb = new();
-
-            sb.Append('(');
-            if (funcArgTypes.Length > 0)
-                sb.Append(funcArgTypes[0].GetTypeName());
-            for (int i = 1; i < funcArgTypes.Length; i++)
-                sb.Append($",{funcArgTypes[i].GetTypeName()}");
-            sb.Append(')');
-            return sb.ToString();
         }
 
         protected CodeWriter.CodeResult GenerateFreeRegister(byte reg)

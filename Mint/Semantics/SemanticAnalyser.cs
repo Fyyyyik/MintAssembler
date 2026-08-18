@@ -55,6 +55,7 @@ namespace Mint.Semantics
                         Name = enumNode.Location == ObjectLocation.Local ? GetFullObjectName(enumNode.Name) : enumNode.Name
                     };
                     enumSbl.Elements.AddRange(enumNode.Elements);
+                    _module.Enums.Add(enumNode.Name, enumSbl);
                 }
                 else if (objBase is ObjectNode obj)
                 {
@@ -80,7 +81,8 @@ namespace Mint.Semantics
                                     {
                                         Name = funcNode.Name,
                                         ReturnType = funcNode.ReturnType,
-                                        HasThis = funcNode.HasThis
+                                        HasThis = funcNode.HasThis,
+                                        IsConst = funcNode.IsConst
                                     };
                                     funcSbl.Parameters.AddRange(funcNode.Params);
                                     objSbl.Functions.Add(funcSbl);
@@ -97,7 +99,8 @@ namespace Mint.Semantics
                     {
                         XRefSymbol xrefSbl = new()
                         {
-                            FullName = obj.Name
+                            FullName = obj.Name,
+                            Loc = obj.Location
                         };
 
                         foreach (MemberNode member in obj.Members)
@@ -114,7 +117,8 @@ namespace Mint.Semantics
                                     XRefFunctionSymbol xrefFuncSbl = new()
                                     {
                                         Name = xrefFuncNode.Name,
-                                        ReturnType = xrefFuncNode.ReturnType
+                                        ReturnType = xrefFuncNode.ReturnType,
+                                        IsConst = xrefFuncNode.IsConst
                                     };
                                     xrefFuncSbl.ArgumentTypes.AddRange(xrefFuncNode.ParamTypes);
                                     xrefSbl.Functions.Add(xrefFuncSbl);

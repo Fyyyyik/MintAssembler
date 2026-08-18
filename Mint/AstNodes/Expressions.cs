@@ -39,7 +39,7 @@ namespace Mint.AstNodes
     public record DereferenceNode(ExprNode Reference, int Line, int Column) : ExprNode(Line, Column), IAssignable;
 
     // This
-    public record ThisNode(int Line, int Column): ExprNode(Line, Column), IUnalterable
+    public record ThisNode(int Line, int Column): ExprNode(Line, Column)
     {
         public ExprNode GetExpr() => this;
     }
