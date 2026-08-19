@@ -1,5 +1,6 @@
 ﻿using Mint.AstNodes;
 using Mint.Util;
+using Mint.Semantics.Symbols;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 
@@ -9,8 +10,8 @@ namespace Mint.Semantics
     {
         // Semantic results
         private readonly Dictionary<ExprNode, ITypeNode?> _exprTypes = new();
-        private readonly Dictionary<ExprNode, ICallable> _exprCalls = new();
-        private readonly Dictionary<ExprNode, IAccessible> _exprAccesses = new();
+        private readonly Dictionary<ExprNode, CallableSymbol> _exprCalls = new();
+        private readonly Dictionary<ExprNode, VariableSymbol> _exprAccesses = new();
         private readonly List<SemanticError> _errors = new();
 
         // The other stuff
@@ -77,13 +78,7 @@ namespace Mint.Semantics
                                     });
                                     break;
                                 case FunctionNode funcNode:
-                                    FunctionSymbol funcSbl = new()
-                                    {
-                                        Name = funcNode.Name,
-                                        ReturnType = funcNode.ReturnType,
-                                        HasThis = funcNode.HasThis,
-                                        IsConst = funcNode.IsConst
-                                    };
+                                    FunctionSymbol funcSbl = new(funcNode.ReturnType, funcNode.Name, funcNode.IsConst, funcNode.HasThis);
                                     funcSbl.Parameters.AddRange(funcNode.Params);
                                     objSbl.Functions.Add(funcSbl);
                                     break;
@@ -114,18 +109,13 @@ namespace Mint.Semantics
                                     });
                                     break;
                                 case ExternalFunctionNode xrefFuncNode:
-                                    XRefFunctionSymbol xrefFuncSbl = new()
-                                    {
-                                        Name = xrefFuncNode.Name,
-                                        ReturnType = xrefFuncNode.ReturnType,
-                                        IsConst = xrefFuncNode.IsConst
-                                    };
-                                    xrefFuncSbl.ArgumentTypes.AddRange(xrefFuncNode.ParamTypes);
+                                    XRefFunctionSymbol xrefFuncSbl = new(xrefFuncNode.ReturnType, xrefFuncNode.Name, xrefFuncNode.IsConst);
+                                    xrefFuncSbl.ParamTypes.AddRange(xrefFuncNode.ParamTypes);
                                     xrefSbl.Functions.Add(xrefFuncSbl);
                                     break;
                                 case ExternalConstructorNode xrefCtNode:
                                     XRefConstructorSymbol xrefCtSbl = new();
-                                    xrefCtSbl.ArgumentTypes.AddRange(xrefCtNode.ParamTypes);
+                                    xrefCtSbl.ParamTypes.AddRange(xrefCtNode.ParamTypes);
                                     xrefSbl.Constructors.Add(xrefCtSbl);
                                     break;
                             }
@@ -135,10 +125,10 @@ namespace Mint.Semantics
                                 if (!preXRefSbl.Variables.ContainsKey(varSbl.Key))
                                     preXRefSbl.Variables.Add(varSbl.Key, varSbl.Value);
                             foreach (XRefFunctionSymbol xrefFuncSbl in xrefSbl.Functions)
-                                if (!preXRefSbl.FindFunction(xrefFuncSbl.Name, xrefFuncSbl.ArgumentTypes, out _))
+                                if (!preXRefSbl.FindFunction(xrefFuncSbl.GetName(), xrefFuncSbl.GetParamTypes(), out _))
                                     preXRefSbl.Functions.Add(xrefFuncSbl);
                             foreach (XRefConstructorSymbol xrefCtSbl in xrefSbl.Constructors)
-                                if (!preXRefSbl.FindConstructor(xrefCtSbl.ArgumentTypes, out _))
+                                if (!preXRefSbl.FindConstructor(xrefCtSbl.GetParamTypes(), out _))
                                     preXRefSbl.Constructors.Add(xrefCtSbl);
                         }
                         else _module.XRefObjects.Add(obj.Name, xrefSbl);
@@ -317,12 +307,17 @@ namespace Mint.Semantics
                     break;
 
                 case ReturnNode ret:
-                    if (_currentFunction?.ReturnType == null)
+                    ITypeNode? funcRetType = _currentFunction?.GetReturnType();
+                    if (funcRetType == null)
+                    {
+                        if (ret.Value != null)
+                            AddError($"Local function with name '{_currentFunction?.GetName()}' shouldn't return anything.", ret);
                         break;
+                    }
                     ITypeNode? retType = ret.Value != null ? AnalyseExpr(ret.Value) : null;
-                    if (!TypesMatch(retType, _currentFunction?.ReturnType))
+                    if (!TypesMatch(retType, funcRetType))
                         AddError(
-                            $"Return type '{retType?.GetTypeName()}' does not match function return type '{_currentFunction?.ReturnType?.GetTypeName()}'",
+                            $"Return type '{retType?.GetTypeName()}' does not match function return type '{funcRetType.GetTypeName()}'",
                             ret
                         );
                     break;
@@ -502,7 +497,7 @@ namespace Mint.Semantics
                 return type;
             }
 
-            ITypeNode? accessType = ResolveMemberType(exprType.GetBaseType(), memberAccess.Member, out IAccessible? accSbl);
+            ITypeNode? accessType = ResolveMemberType(exprType.GetBaseType(), memberAccess.Member, out VariableSymbol? accSbl);
             if (accSbl != null)
                 _exprAccesses[memberAccess] = accSbl;
             _exprTypes[memberAccess] = accessType;
@@ -693,19 +688,21 @@ namespace Mint.Semantics
             if (_module.LocalObjects.TryGetValue(names[^2], out ObjectSymbol? locObj))
                 if (locObj.FindFunction(funcName, argTypes, out FunctionSymbol? objFunc))
                 {
-                    CheckArguments(Utility.ToTypeNodes(objFunc.Parameters), qualifiedCall.Args, qualifiedCall, funcName);
+                    CheckArguments(objFunc.GetParamTypes(), qualifiedCall.Args, qualifiedCall, funcName);
                     _exprCalls[qualifiedCall] = objFunc;
-                    _exprTypes[qualifiedCall] = objFunc.ReturnType;
-                    return objFunc.ReturnType;
+                    ITypeNode? retType = objFunc.GetReturnType();
+                    _exprTypes[qualifiedCall] = retType;
+                    return retType;
                 }
 
             if (_module.XRefObjects.TryGetValue(leadup, out XRefSymbol? xrefCls))
                 if (xrefCls.FindFunction(funcName, argTypes, out XRefFunctionSymbol? xrefFunc))
                 {
-                    CheckArguments(xrefFunc.ArgumentTypes, qualifiedCall.Args, qualifiedCall, funcName);
+                    CheckArguments(xrefFunc.GetParamTypes(), qualifiedCall.Args, qualifiedCall, funcName);
                     _exprCalls[qualifiedCall] = xrefFunc;
-                    _exprTypes[qualifiedCall] = xrefFunc.ReturnType;
-                    return xrefFunc.ReturnType;
+                    ITypeNode? retType = xrefFunc.GetReturnType();
+                    _exprTypes[qualifiedCall] = retType;
+                    return retType;
                 }
 
             AddError($"Cannot resolve '{qualifiedCall.FullName}'.", qualifiedCall);
@@ -729,10 +726,11 @@ namespace Mint.Semantics
             {
                 if (obj.FindFunction(memberCall.Name, argTypes, out FunctionSymbol? funcSbl))
                 {
-                    CheckArguments(Utility.ToTypeNodes(funcSbl.Parameters), memberCall.Args, memberCall, memberCall.Name);
+                    CheckArguments(funcSbl.GetParamTypes(), memberCall.Args, memberCall, memberCall.Name);
                     _exprCalls[memberCall] = funcSbl;
-                    _exprTypes[memberCall] = funcSbl.ReturnType;
-                    return funcSbl.ReturnType;
+                    ITypeNode? retType = funcSbl.GetReturnType();
+                    _exprTypes[memberCall] = retType;
+                    return retType;
                 }
             }
 
@@ -740,10 +738,11 @@ namespace Mint.Semantics
             {
                 if (xrefObj.FindFunction(memberCall.Name, argTypes, out XRefFunctionSymbol? xrefFunc))
                 {
-                    CheckArguments(xrefFunc.ArgumentTypes, memberCall.Args, memberCall, memberCall.Name);
+                    CheckArguments(xrefFunc.GetParamTypes(), memberCall.Args, memberCall, memberCall.Name);
                     _exprCalls[memberCall] = xrefFunc;
-                    _exprTypes[memberCall] = xrefFunc.ReturnType;
-                    return xrefFunc.ReturnType;
+                    ITypeNode? retType = xrefFunc.GetReturnType();
+                    _exprTypes[memberCall] = retType;
+                    return retType;
                 }
             }
 
@@ -866,7 +865,7 @@ namespace Mint.Semantics
                 return null;
             }
 
-            ITypeNode? memberType = ResolveMemberType(objType.GetBaseType(), memberOffset.Member, out IAccessible? accSbl);
+            ITypeNode? memberType = ResolveMemberType(objType.GetBaseType(), memberOffset.Member, out VariableSymbol? accSbl);
 
             if (accSbl != null)
                 _exprAccesses[memberOffset] = accSbl;
@@ -976,7 +975,7 @@ namespace Mint.Semantics
             return returnType;
         }
 
-        private ITypeNode? ResolveMemberType(TypeNode objType, string member, out IAccessible? accessSbl)
+        private ITypeNode? ResolveMemberType(TypeNode objType, string member, out VariableSymbol? accessSbl)
         {
             accessSbl = null;
 
@@ -1041,7 +1040,7 @@ namespace Mint.Semantics
             }
         }
 
-        private static bool TypesMatch(ITypeNode? a, ITypeNode? b)
+        internal static bool TypesMatch(ITypeNode? a, ITypeNode? b)
         {
             if (a == null || b == null) return false;
 

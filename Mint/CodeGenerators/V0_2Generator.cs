@@ -1,6 +1,7 @@
 ﻿using KirbyLib.Mint;
 using Mint.AstNodes;
 using Mint.Semantics;
+using Mint.Semantics.Symbols;
 using OneOf;
 using System;
 using System.Collections.Generic;
@@ -228,8 +229,9 @@ namespace Mint.CodeGenerators
                 _registers.AllocateRegister(param.Name);
 
             string retTypeName = "void";
-            if (_currentFunction.ReturnType != null)
-                retTypeName = _currentFunction.ReturnType.GetTypeName();
+            ITypeNode? retType = _currentFunction.GetReturnType();
+            if (retType != null)
+                retTypeName = retType.GetTypeName();
 
             string funcName = funcNode.Name + '(';
             ITypeNode[] paramTypes = Utility.ToTypeNodes(_currentFunction.Parameters);
@@ -281,7 +283,7 @@ namespace Mint.CodeGenerators
                 );
 
             byte argCount = (byte)_currentFunction.Parameters.Count;
-            if (_currentFunction.ReturnType != null) argCount++;
+            if (_currentFunction.GetReturnType() != null) argCount++;
             if (_currentFunction.HasThis) argCount++;
 
             CodeWriter writer = new();
@@ -1097,7 +1099,7 @@ namespace Mint.CodeGenerators
         }
 
         private CodeWriter.CodeResult TryGenerateReturnInstanceSetup(
-            ICallable callable,
+            CallableSymbol callable,
             byte destRegister,
             out bool isReturn)
         {
@@ -1177,7 +1179,7 @@ namespace Mint.CodeGenerators
                         argTypes = Utility.ToTypeNodes(ctSbl.Parameters);
                 if (_semantic.Module.XRefObjects.TryGetValue(pushInstance.ObjectName, out XRefSymbol? xrefSbl))
                     if (xrefSbl.FindConstructor(argTypes, out XRefConstructorSymbol? xrefCtSbl))
-                        argTypes = xrefCtSbl.ArgumentTypes.ToArray();
+                        argTypes = xrefCtSbl.GetParamTypes();
 
                 StringBuilder sb = new($"{pushInstance.ObjectName}.this(");
                 for (int i = 0; i < argTypes.Length; i++)
@@ -1529,9 +1531,9 @@ namespace Mint.CodeGenerators
 
         protected byte GetOpcode(string name) => OpcodeHelper.OpcodeByName[Version][name];
 
-        protected ICallable GetFuncSymbol(ExprNode call)
+        protected CallableSymbol GetFuncSymbol(ExprNode call)
         {
-            if (_semantic.ExprCalls.TryGetValue(call, out ICallable? callable))
+            if (_semantic.ExprCalls.TryGetValue(call, out CallableSymbol? callable))
                 return callable;
             throw new CodeGeneratorException("Couldn't find function symbol from call expression.", call.Line, call.Column);
         }

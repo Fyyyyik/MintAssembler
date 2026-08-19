@@ -126,7 +126,7 @@ namespace Mint.CodeGenerators
 
             OpcodeHelper.FEnterFlags flags = OpcodeHelper.FEnterFlags.None;
             if (_currentFunction.HasThis) flags |= OpcodeHelper.FEnterFlags.Member;
-            if (_currentFunction.ReturnType != null) flags |= OpcodeHelper.FEnterFlags.Return;
+            if (_currentFunction.GetReturnType() != null) flags |= OpcodeHelper.FEnterFlags.Return;
 
             CodeWriter writer = new();
             writer.Instructions.Add(new Instruction(GetOpcode("fenter"), _registers.RegisterCount, argCount, (byte)flags));
