@@ -26,7 +26,7 @@ namespace Mint.CodeGenerators
         protected virtual int InstructionSize => 4;
         protected virtual byte[] Version => [0, 2, 0, 0]; // must override for each version
 
-        protected RegisterManager _registers = new();
+        protected RegisterManager _registers;
         protected readonly SemanticResult _semantic;
 
         protected readonly List<byte> _sdata = new();
@@ -97,7 +97,7 @@ namespace Mint.CodeGenerators
 
         protected MintFunction GenerateVarInit(VariableNode[] varNodes)
         {
-            _registers = new();
+            _registers = new(OpcodeHelper.FEnterFlags.None);
             _registers.PushNewBlock();
 
             CodeWriter writer = new();
@@ -219,19 +219,25 @@ namespace Mint.CodeGenerators
                     funcNode.Line,
                     funcNode.Column
                 );
-            _registers = new();
-            _registers.PushNewBlock();
 
-            if (_currentFunction.HasThis)
-                _registers.AllocateRegister(); // should be r0
+            ITypeNode? retType = _currentFunction.GetReturnType();
+
+            OpcodeHelper.FEnterFlags funcFlags = OpcodeHelper.FEnterFlags.None;
+
+            if (_currentFunction.HasThis) funcFlags |= OpcodeHelper.FEnterFlags.Member;
+
+            string retTypeName = "void";
+            if (retType != null)
+            {
+                retTypeName = retType.GetTypeName();
+                funcFlags |= OpcodeHelper.FEnterFlags.Return;
+            }
+
+            _registers = new(funcFlags);
+            _registers.PushNewBlock();
 
             foreach (ParamNode param in _currentFunction.Parameters)
                 _registers.AllocateRegister(param.Name);
-
-            string retTypeName = "void";
-            ITypeNode? retType = _currentFunction.GetReturnType();
-            if (retType != null)
-                retTypeName = retType.GetTypeName();
 
             string funcName = funcNode.Name + '(';
             ITypeNode[] paramTypes = Utility.ToTypeNodes(_currentFunction.Parameters);
@@ -586,7 +592,10 @@ namespace Mint.CodeGenerators
                 byte valReg = _registers.AllocateRegister();
                 writer.Append(GenerateExpr(returnNode.Value, valReg));
 
-                writer.Instructions.Add(new Instruction(GetOpcode("ldsrsr"), 0, valReg));
+                if (!_registers.ReturnReg.HasValue)
+                    throw new RegisterManagerException("No return register has been allocated in the register manager.");
+
+                writer.Instructions.Add(new Instruction(GetOpcode("ldsrsr"), _registers.ReturnReg.Value, valReg));
                 writer.Instructions.Add(new Instruction(GetOpcode("fret"), 0xFF, 0, 0xFF));
 
                 writer.Append(GenerateFreeRegister(valReg));
@@ -850,7 +859,11 @@ namespace Mint.CodeGenerators
         protected CodeWriter.CodeResult GenerateThis(byte destRegister)
         {
             CodeWriter writer = new();
-            writer.Instructions.Add(new Instruction(GetOpcode("ldsrsr"), destRegister, 0));
+
+            if (!_registers.ThisReg.HasValue)
+                throw new RegisterManagerException("No register for the instance of the object has been allocated.");
+            writer.Instructions.Add(new Instruction(GetOpcode("ldsrsr"), destRegister, _registers.ThisReg.Value));
+
             return writer.Result;
         }
 

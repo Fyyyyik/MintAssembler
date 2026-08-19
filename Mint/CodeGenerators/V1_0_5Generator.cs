@@ -103,6 +103,9 @@ namespace Mint.CodeGenerators
                 false
             ), 0xFF, vBytes.Item1, vBytes.Item2));
 
+            foreach (byte reg in regs) writer.Append(GenerateFreeRegister(reg));
+            _registers.FreeRegister(instReg);
+
             return writer.Result;
         }
 

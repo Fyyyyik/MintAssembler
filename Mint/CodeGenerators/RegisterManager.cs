@@ -6,10 +6,31 @@ namespace Mint.CodeGenerators
 {
     public class RegisterManager
     {
-        public Dictionary<string, byte> VarToReg = new();
-        public byte RegisterCount = 0;
+        public Dictionary<string, byte> VarToReg { get; } = new();
+        public byte? ReturnReg { get; }
+        public byte? ThisReg { get; }
+        public byte RegisterCount { get; private set; } = 0;
 
-        private Stack<HashSet<byte>> _usedRegisters = new();
+        private Stack<HashSet<byte>> _usedRegisters { get; } = new();
+
+        public RegisterManager(OpcodeHelper.FEnterFlags flags)
+        {
+            _usedRegisters.Push(new());
+
+            byte lowest = 0;
+            if (flags.HasFlag(OpcodeHelper.FEnterFlags.Return))
+            {
+                ReturnReg = 0;
+                _usedRegisters.Peek().Add(0);
+                lowest++;
+            }
+
+            if (flags.HasFlag(OpcodeHelper.FEnterFlags.Member))
+            {
+                ThisReg = lowest;
+                _usedRegisters.Peek().Add(lowest);
+            }
+        }
 
         public byte AllocateRegister(string name)
         {

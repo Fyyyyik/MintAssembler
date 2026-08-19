@@ -87,6 +87,8 @@ namespace Mint.CodeGenerators
                 new Dictionary<string, byte>()
                 {
                     { "ldsrsr", 0x05 },
+                    { "ldfrsr", 0x07 },
+                    { "ldfs2", 0x08 },
                     { "ldfs3f", 0x09 },
                     { "ldsrsv", 0x0C },
                     { "stsrsr", 0x12 },
@@ -94,6 +96,9 @@ namespace Mint.CodeGenerators
                     { "fenter", 0x46 },
                     { "fleave", 0x47 },
                     { "fret", 0x48 },
+                    { "call", 0x49 },
+                    { "callnv", 0x4A },
+                    { "callnt", 0x4B },
                     { "aridx", 0x55 }
                 }
             }
