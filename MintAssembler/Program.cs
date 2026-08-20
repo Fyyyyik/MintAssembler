@@ -1,5 +1,4 @@
 ﻿using System.CommandLine;
-using System.Reflection.Metadata.Ecma335;
 using KirbyLib.IO;
 using KirbyLib.Mint;
 using Mint;
@@ -191,9 +190,21 @@ namespace MintAssembler
                 }
             }
 
-            WriteVerbose("Semantic analysis completed without issue.\nGenerating the code for Mint version 0.2.0.0 ...");
+            WriteVerbose($"Semantic analysis completed without issue.\nGenerating the code for Mint version {options.Version} ...");
 
-            ModuleRtDL compiled = new V0_2Generator(result).GenerateRtDL(rewritten);
+            OneOf<ModuleRtDL, Module>? compiledNullable = options.Version switch
+            {
+                "0.2" => new V0_2Generator(result).GenerateRtDL(rewritten),
+                "1.0.5" => new V1_0_5Generator(result).Generate(rewritten),
+
+                _ => null
+            };
+            if (!compiledNullable.HasValue)
+            {
+                Console.Error.WriteLine($"Version {options.Version} is not a currently known version to compile to.");
+                return;
+            }
+            var compiled = compiledNullable.Value;
 
             if (options.Output != null && options.Output.Exists)
             {
@@ -201,17 +212,37 @@ namespace MintAssembler
 
                 if (options.Version == "0.2")
                 {
+                    ModuleRtDL rtdl = compiled.AsT0;
                     ArchiveRtDL outArchive;
                     using (FileStream stream = new FileStream(options.Output.FullName, FileMode.Open, FileAccess.Read))
                     using (EndianBinaryReader reader = new(stream))
                         outArchive = new(reader);
 
-                    if (outArchive.ModuleExists(compiled.Name))
+                    if (outArchive.ModuleExists(rtdl.Name))
                     {
-                        ModuleRtDL ogModule = outArchive.GetModule(compiled.Name);
+                        ModuleRtDL ogModule = outArchive.GetModule(rtdl.Name);
                         outArchive.Modules.Remove(ogModule);
                     }
-                    outArchive.Modules.Add(compiled);
+                    outArchive.Modules.Add(rtdl);
+
+                    using (FileStream stream1 = new(options.Output.FullName, FileMode.Open, FileAccess.Write))
+                    using (EndianBinaryWriter writer = new(stream1))
+                        outArchive.Write(writer);
+                }
+                else
+                {
+                    Module notRtdl = compiled.AsT1;
+                    Archive outArchive;
+                    using (FileStream stream = new FileStream(options.Output.FullName, FileMode.Open, FileAccess.Read))
+                    using (EndianBinaryReader reader = new(stream))
+                        outArchive = new(reader);
+
+                    if (outArchive.ModuleExists(notRtdl.Name))
+                    {
+                        Module ogModule = outArchive.GetModule(notRtdl.Name);
+                        outArchive.Modules.Remove(ogModule);
+                    }
+                    outArchive.Modules.Add(notRtdl);
 
                     using (FileStream stream1 = new(options.Output.FullName, FileMode.Open, FileAccess.Write))
                     using (EndianBinaryWriter writer = new(stream1))
@@ -222,15 +253,23 @@ namespace MintAssembler
             }
             else
             {
+                string modName = "";
+                compiled.Switch(
+                    (modRtdl) => modName = modRtdl.Name,
+                    (mod) => modName = mod.Name
+                );
                 string output = options.Output == null ?
-                    $"{Directory.GetCurrentDirectory()}{Path.DirectorySeparatorChar}{compiled.Name}.bin" :
+                    $"{Directory.GetCurrentDirectory()}{Path.DirectorySeparatorChar}{modName}.bin" :
                     options.Output.FullName;
 
                 WriteVerbose($"Finished generating the Mint module!\nSaving it to '{output}'...");
 
                 using (FileStream stream = new(output, FileMode.Create, FileAccess.Write))
                 using (EndianBinaryWriter writer = new(stream))
-                    compiled.Write(writer);
+                    compiled.Switch(
+                        (modRtdl) => modRtdl.Write(writer),
+                        (mod) => mod.Write(writer)
+                    );
             }
 
             WriteVerbose("Finished writing.\nThe compiler is finished.");

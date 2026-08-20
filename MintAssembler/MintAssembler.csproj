@@ -40,4 +40,8 @@
     </None>
   </ItemGroup>
 
+  <ItemGroup>
+    <Folder Include="Examples\1.0.5\" />
+  </ItemGroup>
+
 </Project>
