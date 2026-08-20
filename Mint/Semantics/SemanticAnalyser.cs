@@ -78,12 +78,18 @@ namespace Mint.Semantics
                                     });
                                     break;
                                 case FunctionNode funcNode:
-                                    FunctionSymbol funcSbl = new(funcNode.ReturnType, funcNode.Name, funcNode.IsConst, funcNode.HasThis);
+                                    FunctionSymbol funcSbl = new(funcNode.ReturnType, funcNode.Name, funcNode.IsConst, funcNode.HasThis)
+                                    {
+                                        CallLoc = objBase.Location
+                                    };
                                     funcSbl.Parameters.AddRange(funcNode.Params);
                                     objSbl.Functions.Add(funcSbl);
                                     break;
                                 case ConstructorNode ctNode:
-                                    ConstructorSymbol ctSbl = new();
+                                    ConstructorSymbol ctSbl = new()
+                                    {
+                                        CallLoc = objBase.Location
+                                    };
                                     ctSbl.Parameters.AddRange(ctNode.Params);
                                     objSbl.Constructors.Add(ctSbl);
                                     break;
@@ -109,12 +115,18 @@ namespace Mint.Semantics
                                     });
                                     break;
                                 case ExternalFunctionNode xrefFuncNode:
-                                    XRefFunctionSymbol xrefFuncSbl = new(xrefFuncNode.ReturnType, xrefFuncNode.Name, xrefFuncNode.IsConst);
+                                    XRefFunctionSymbol xrefFuncSbl = new(xrefFuncNode.ReturnType, xrefFuncNode.Name, xrefFuncNode.IsConst)
+                                    {
+                                        CallLoc = objBase.Location
+                                    };
                                     xrefFuncSbl.ParamTypes.AddRange(xrefFuncNode.ParamTypes);
                                     xrefSbl.Functions.Add(xrefFuncSbl);
                                     break;
                                 case ExternalConstructorNode xrefCtNode:
-                                    XRefConstructorSymbol xrefCtSbl = new();
+                                    XRefConstructorSymbol xrefCtSbl = new()
+                                    {
+                                        CallLoc = objBase.Location
+                                    };
                                     xrefCtSbl.ParamTypes.AddRange(xrefCtNode.ParamTypes);
                                     xrefSbl.Constructors.Add(xrefCtSbl);
                                     break;

@@ -11,6 +11,7 @@ using System.Numerics;
 using System.Reflection.Metadata;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices.Marshalling;
+using System.Security.AccessControl;
 using System.Text;
 using System.Threading.Tasks.Dataflow;
 using System.Xml.Linq;
@@ -263,7 +264,7 @@ namespace Mint.CodeGenerators
             return mintFunc;
         }
 
-        private CodeWriter.CodeResult GenerateBlock(BlockNode block, bool isBeginning = false)
+        protected CodeWriter.CodeResult GenerateBlock(BlockNode block, bool isBeginning = false)
         {
             _registers.PushNewBlock();
             CodeWriter writer = new();
@@ -320,7 +321,7 @@ namespace Mint.CodeGenerators
             return writer.Result;
         }
 
-        private CodeWriter.CodeResult GenerateStatement(StmtNode statement) => statement switch
+        protected CodeWriter.CodeResult GenerateStatement(StmtNode statement) => statement switch
         {
             VarDeclNode vd => GenerateVarDecl(vd),
             AssignNode ass => GenerateAssign(ass),
@@ -395,7 +396,7 @@ namespace Mint.CodeGenerators
             return writer.Result;
         }
 
-        protected CodeWriter.CodeResult GenerateMemberAssign(AssignNode assign, MemberAccessNode targetMember)
+        protected virtual CodeWriter.CodeResult GenerateMemberAssign(AssignNode assign, MemberAccessNode targetMember)
         {
             CodeWriter writer = new();
 
@@ -777,7 +778,7 @@ namespace Mint.CodeGenerators
         protected CodeWriter.CodeResult GenerateStringLiteral(StringLiteralNode stringLiteral, byte destRegister)
         {
             short v = (short)_sdata.Count;
-            _sdata.AddRange(Encoding.UTF8.GetBytes(stringLiteral.Value + '\0'));
+            _sdata.AddRange(Encoding.UTF8.GetBytes(stringLiteral.Value + '\0')); // string is null-terminated
 
             CodeWriter writer = new();
             (byte, byte) vBytes = CodeWriter.ToBytes(v);
@@ -794,7 +795,7 @@ namespace Mint.CodeGenerators
                 writer.Instructions.Add(new Instruction(GetOpcode("ldsrsr"), destRegister, reg));
                 return writer.Result;
             }
-            throw new CodeGeneratorException($"Register for identifier '{identifier.Name}' not found.", identifier.Line, identifier.Column);
+            throw new RegisterManagerException($"Register for identifier '{identifier.Name}' not found.");
         }
 
         protected CodeWriter.CodeResult GenerateQualifiedAccess(QualifiedAccessNode qualifiedAccess, byte destRegister)
@@ -808,7 +809,7 @@ namespace Mint.CodeGenerators
             return writer.Result;
         }
 
-        protected CodeWriter.CodeResult GenerateMemberAccess(MemberAccessNode memberAccess, byte destRegister)
+        protected virtual CodeWriter.CodeResult GenerateMemberAccess(MemberAccessNode memberAccess, byte destRegister)
         {
             CodeWriter writer = new();
 
@@ -869,50 +870,14 @@ namespace Mint.CodeGenerators
 
         protected CodeWriter.CodeResult GenerateBinaryExpr(BinaryExprNode binaryExpr, byte destRegister)
         {
+            if (binaryExpr.Op is "&&" or "||") return GenerateLogicalExpr(binaryExpr, destRegister);
+
             CodeWriter writer = new();
 
             byte leftReg = _registers.AllocateRegister();
             writer.Append(GenerateExpr(binaryExpr.Left, leftReg));
 
-            byte rightReg;
-            if (binaryExpr.Op is "&&" or "||")
-            {
-                // there is no logical 'and' and 'or' opcode in mint so gotta do it the nasty way
-
-                byte jmpOpcode = GetOpcode(binaryExpr.Op == "&&" ? "jmpneg" : "jmppos");
-
-                Instruction jmpLeft = new(jmpOpcode, leftReg);
-                int jmpLeftIdx = writer.Instructions.Count;
-                writer.Instructions.Add(jmpLeft);
-
-                writer.Append(GenerateFreeRegister(leftReg));
-
-                rightReg = _registers.AllocateRegister();
-                writer.Append(GenerateExpr(binaryExpr.Right, rightReg));
-
-                Instruction jmpRight = new(jmpOpcode, rightReg);
-                int jmpRightIdx = writer.Instructions.Count;
-                writer.Instructions.Add(jmpRight);
-
-                writer.Append(GenerateFreeRegister(rightReg));
-
-                writer.Instructions.Add(new Instruction(GetOpcode(binaryExpr.Op == "&&" ? "ldsrbt" : "ldsrzr"), destRegister));
-                writer.Instructions.Add(new Instruction(GetOpcode("jmp"), 0xFF, 0, 2));
-
-                short jmpLeftV = (short)(writer.Instructions.Count - jmpLeftIdx);
-                (byte, byte) vBytes = CodeWriter.ToBytes(jmpLeftV);
-                writer.Instructions[jmpLeftIdx] = jmpLeft with { X = vBytes.Item1, Y = vBytes.Item2 };
-
-                short jmpRightV = (short)(writer.Instructions.Count - jmpRightIdx);
-                vBytes = CodeWriter.ToBytes(jmpRightV);
-                writer.Instructions[jmpRightIdx] = jmpRight with { X = vBytes.Item1, Y = vBytes.Item2 };
-
-                writer.Instructions.Add(new Instruction(GetOpcode(binaryExpr.Op == "&&" ? "ldsrzr" : "ldsrbt"), destRegister));
-
-                return writer.Result;
-            }
-
-            rightReg = _registers.AllocateRegister();
+            byte rightReg = _registers.AllocateRegister();
             writer.Append(GenerateExpr(binaryExpr.Right, rightReg));
 
             ITypeNode? leftType = _semantic.ExprTypes[binaryExpr.Left];
@@ -920,41 +885,12 @@ namespace Mint.CodeGenerators
             if (leftType == null || rightType == null)
                 throw new CodeGeneratorException("Cannot have a binary expression with type 'void'.", binaryExpr.Line, binaryExpr.Column);
 
-            string opcode = binaryExpr.Op switch
-            {
-                "+" when AreBothType(leftType, rightType, "int") => "addi32",
-                "+" when AreBothType(leftType, rightType, "float") => "addf32",
-                "-" when AreBothType(leftType, rightType, "int") => "subi32",
-                "-" when AreBothType(leftType, rightType, "float") => "subf32",
-                "*" when AreBothType(leftType, rightType, "int") => "muls32",
-                "*" when AreBothType(leftType, rightType, "float") => "mulf32",
-                "/" when AreBothType(leftType, rightType, "int") => "divs32",
-                "/" when AreBothType(leftType, rightType, "float") => "divf32",
-                "%" when AreBothType(leftType, rightType, "int") => "mods32",
-                "<" or ">" when AreBothType(leftType, rightType, "int") => "lts32",
-                "<=" or ">=" when AreBothType(leftType, rightType, "int") => "les32",
-                "==" when AreBothType(leftType, rightType, "int") => "eqi32",
-                "!=" when AreBothType(leftType, rightType, "int") => "nei32",
-                ">" or "<" when AreBothType(leftType, rightType, "float") => "ltf32",
-                ">=" or "<=" when AreBothType(leftType, rightType, "float") => "lef32",
-                "==" when AreBothType(leftType, rightType, "float") => "eqf32",
-                "!=" when AreBothType(leftType, rightType, "float") => "nef32",
-                "==" when AreBothType(leftType, rightType, "bool") => "eqbool",
-                "!=" when AreBothType(leftType, rightType, "bool") => "nebool",
-                "&" when AreBothType(leftType, rightType, "int") => "andi32",
-                "|" when AreBothType(leftType, rightType, "int") => "ori32",
-                "^" when AreBothType(leftType, rightType, "int") => "xori32",
-                "<<" when AreBothType(leftType, rightType, "int") => "slli32",
-                ">>" when AreBothType(leftType, rightType, "int") => "slri32",
-
-                _ => throw new CodeGeneratorException($"Unknown binary operation with operator '{binaryExpr.Op}'.", binaryExpr.Line, binaryExpr.Column)
-            };
+            string opcode = GetBinaryOpcodeFromOperator(binaryExpr.Op, leftType, rightType);
+            if (opcode == string.Empty)
+                throw new CodeGeneratorException($"Unknown binary operation with operator '{binaryExpr.Op}'.", binaryExpr.Line, binaryExpr.Column);
 
             // Special case for comparing stuff
-            bool invertOperands = false;
-            if ((opcode is "lts32" or "les32" && binaryExpr.Op is ">" or ">=") ||
-                (opcode is "ltf32" or "lef32" && binaryExpr.Op is "<" or "<="))
-                invertOperands = true;
+            bool invertOperands = ShouldInvertOperands(opcode, binaryExpr.Op);
 
             writer.Instructions.Add(new Instruction(
                 GetOpcode(opcode),
@@ -964,6 +900,82 @@ namespace Mint.CodeGenerators
             ));
             writer.Append(GenerateFreeRegister(leftReg));
             writer.Append(GenerateFreeRegister(rightReg));
+            return writer.Result;
+        }
+
+        protected virtual string GetBinaryOpcodeFromOperator(string op, ITypeNode leftType, ITypeNode rightType) => op switch
+        {
+            "+" when AreBothType(leftType, rightType, "int") => "addi32",
+            "+" when AreBothType(leftType, rightType, "float") => "addf32",
+            "-" when AreBothType(leftType, rightType, "int") => "subi32",
+            "-" when AreBothType(leftType, rightType, "float") => "subf32",
+            "*" when AreBothType(leftType, rightType, "int") => "muls32",
+            "*" when AreBothType(leftType, rightType, "float") => "mulf32",
+            "/" when AreBothType(leftType, rightType, "int") => "divs32",
+            "/" when AreBothType(leftType, rightType, "float") => "divf32",
+            "%" when AreBothType(leftType, rightType, "int") => "mods32",
+            "<" or ">" when AreBothType(leftType, rightType, "int") => "lts32",
+            "<=" or ">=" when AreBothType(leftType, rightType, "int") => "les32",
+            "==" when AreBothType(leftType, rightType, "int") => "eqi32",
+            "!=" when AreBothType(leftType, rightType, "int") => "nei32",
+            ">" or "<" when AreBothType(leftType, rightType, "float") => "ltf32",
+            ">=" or "<=" when AreBothType(leftType, rightType, "float") => "lef32",
+            "==" when AreBothType(leftType, rightType, "float") => "eqf32",
+            "!=" when AreBothType(leftType, rightType, "float") => "nef32",
+            "==" when AreBothType(leftType, rightType, "bool") => "eqbool",
+            "!=" when AreBothType(leftType, rightType, "bool") => "nebool",
+            "&" when AreBothType(leftType, rightType, "int") => "andi32",
+            "|" when AreBothType(leftType, rightType, "int") => "ori32",
+            "^" when AreBothType(leftType, rightType, "int") => "xori32",
+            "<<" when AreBothType(leftType, rightType, "int") => "slli32",
+            ">>" when AreBothType(leftType, rightType, "int") => "slri32",
+
+            _ => string.Empty
+        };
+
+        protected virtual bool ShouldInvertOperands(string opcode, string operation)
+            => (opcode is "lts32" or "les32" && operation is ">" or ">=") ||
+               (opcode is "ltf32" or "lef32" && operation is "<" or "<=");
+
+        protected CodeWriter.CodeResult GenerateLogicalExpr(BinaryExprNode binaryExpr, byte destRegister)
+        {
+            CodeWriter writer = new();
+
+            // there is no logical 'and' and 'or' opcode in mint so gotta do it the nasty way
+
+            byte jmpOpcode = GetOpcode(binaryExpr.Op == "&&" ? "jmpneg" : "jmppos");
+
+            byte leftReg = _registers.AllocateRegister();
+            writer.Append(GenerateExpr(binaryExpr.Left, leftReg));
+
+            Instruction jmpLeft = new(jmpOpcode, leftReg);
+            int jmpLeftIdx = writer.Instructions.Count;
+            writer.Instructions.Add(jmpLeft);
+
+            writer.Append(GenerateFreeRegister(leftReg));
+
+            byte rightReg = _registers.AllocateRegister();
+            writer.Append(GenerateExpr(binaryExpr.Right, rightReg));
+
+            Instruction jmpRight = new(jmpOpcode, rightReg);
+            int jmpRightIdx = writer.Instructions.Count;
+            writer.Instructions.Add(jmpRight);
+
+            writer.Append(GenerateFreeRegister(rightReg));
+
+            writer.Instructions.Add(new Instruction(GetOpcode(binaryExpr.Op == "&&" ? "ldsrbt" : "ldsrzr"), destRegister));
+            writer.Instructions.Add(new Instruction(GetOpcode("jmp"), 0xFF, 0, 2));
+
+            short jmpLeftV = (short)(writer.Instructions.Count - jmpLeftIdx);
+            (byte, byte) vBytes = CodeWriter.ToBytes(jmpLeftV);
+            writer.Instructions[jmpLeftIdx] = jmpLeft with { X = vBytes.Item1, Y = vBytes.Item2 };
+
+            short jmpRightV = (short)(writer.Instructions.Count - jmpRightIdx);
+            vBytes = CodeWriter.ToBytes(jmpRightV);
+            writer.Instructions[jmpRightIdx] = jmpRight with { X = vBytes.Item1, Y = vBytes.Item2 };
+
+            writer.Instructions.Add(new Instruction(GetOpcode(binaryExpr.Op == "&&" ? "ldsrzr" : "ldsrbt"), destRegister));
+
             return writer.Result;
         }
 
@@ -983,20 +995,24 @@ namespace Mint.CodeGenerators
             writer.Append(GenerateExpr(unaryExpr.Operand, operandReg));
 
             TypeNode baseType = operandType.GetBaseType();
-            string opcode = unaryExpr.Op switch
-            {
-                "-" when baseType.Name == "int" => "negs32",
-                "-" when baseType.Name == "float" => "negf32",
-                "!" when baseType.Name == "bool" => "ntbool",
-
-                _ => throw new CodeGeneratorException($"Unknown unary operation with operator '{unaryExpr.Op}'.", unaryExpr.Line, unaryExpr.Column)
-            };
+            string opcode = GetUnaryOpcodeFromOperator(unaryExpr.Op, baseType.Name);
+            if (opcode == string.Empty)
+                throw new CodeGeneratorException($"Unknown unary operation with operator '{unaryExpr.Op}'.", unaryExpr.Line, unaryExpr.Column);
 
             writer.Instructions.Add(new Instruction(GetOpcode(opcode), destRegister, operandReg));
 
             writer.Append(GenerateFreeRegister(operandReg));
             return writer.Result;
         }
+
+        protected virtual string GetUnaryOpcodeFromOperator(string op, string typeName) => op switch
+        {
+            "-" when typeName == "int" => "negs32",
+            "-" when typeName == "float" => "negf32",
+            "!" when typeName == "bool" => "ntbool",
+
+            _ => string.Empty
+        };
 
         protected CodeWriter.CodeResult GenerateConditional(ConditionalNode conditional, byte destRegister)
         {
@@ -1030,13 +1046,13 @@ namespace Mint.CodeGenerators
             return writer.Result;
         }
 
-        protected CodeWriter.CodeResult GenerateQualifiedCall(QualifiedCallNode qualifiedCall, byte destRegister)
+        protected virtual CodeWriter.CodeResult GenerateQualifiedCall(QualifiedCallNode qualifiedCall, byte destRegister)
         {
             CodeWriter writer = new();
 
-            ITypeNode[] argTypes = GetTypesFromArgs(qualifiedCall.Args, qualifiedCall.Line, qualifiedCall.Column);
+            CallableSymbol sbl = _semantic.ExprCalls[qualifiedCall];
 
-            writer.Append(TryGenerateReturnInstanceSetup(GetFuncSymbol(qualifiedCall), destRegister, out bool isReturn));
+            writer.Append(TryGenerateReturnInstanceSetup(sbl, destRegister));
 
             List<byte> regs = new();
             foreach (ExprNode arg in qualifiedCall.Args)
@@ -1045,10 +1061,11 @@ namespace Mint.CodeGenerators
                 writer.Append(GenerateExpr(arg, regs[^1]));
             }
 
+            bool isReturn = sbl.GetReturnType() != null;
             for (int i = 0; i < regs.Count; i++)
                 writer.Instructions.Add(new Instruction(GetOpcode("ldfrsr"), (byte)(isReturn ? i + 1 : i), regs[i]));
 
-            ushort v = (ushort)AddOrGetXRef(qualifiedCall.FullName + GetFuncSymbol(qualifiedCall).GetSignatureWithoutName());
+            ushort v = (ushort)AddOrGetXRef(qualifiedCall.FullName + sbl.GetSignatureWithoutName());
             (byte, byte) vBytes = CodeWriter.ToBytes(v);
             writer.Instructions.Add(new Instruction(GetOpcode("call"), 0xFF, vBytes.Item1, vBytes.Item2));
 
@@ -1060,11 +1077,9 @@ namespace Mint.CodeGenerators
             return writer.Result;
         }
 
-        protected CodeWriter.CodeResult GenerateMemberCall(MemberCallNode memberCall, byte destRegister)
+        protected virtual CodeWriter.CodeResult GenerateMemberCall(MemberCallNode memberCall, byte destRegister)
         {
             CodeWriter writer = new();
-
-            ITypeNode[] argTypes = GetTypesFromArgs(memberCall.Args, memberCall.Line, memberCall.Column);
 
             ITypeNode? objType = _semantic.ExprTypes[memberCall.Object];
             if (objType == null)
@@ -1074,7 +1089,9 @@ namespace Mint.CodeGenerators
                     memberCall.Column
                 );
 
-            writer.Append(TryGenerateReturnInstanceSetup(GetFuncSymbol(memberCall), destRegister, out bool isReturn));
+            CallableSymbol sbl = _semantic.ExprCalls[memberCall];
+
+            writer.Append(TryGenerateReturnInstanceSetup(sbl, destRegister));
 
             byte objReg = _registers.AllocateRegister();
             writer.Append(GenerateExpr(memberCall.Object, objReg));
@@ -1086,6 +1103,7 @@ namespace Mint.CodeGenerators
                 writer.Append(GenerateExpr(arg, regs[^1]));
             }
 
+            bool isReturn = sbl.GetReturnType() != null;
             writer.Instructions.Add(new Instruction(
                 GetOpcode("ldfrsr"),
                 (byte)(isReturn ? 1 : 0),
@@ -1098,7 +1116,7 @@ namespace Mint.CodeGenerators
                     regs[i]
                 ));
 
-            ushort v = (ushort)AddOrGetXRef($"{objType.GetBaseType().Name}.{GetFuncSymbol(memberCall).GetSignature()}");
+            ushort v = (ushort)AddOrGetXRef($"{objType.GetBaseType().Name}.{sbl.GetSignature()}");
             (byte, byte) vBytes = CodeWriter.ToBytes(v);
             writer.Instructions.Add(new Instruction(GetOpcode("call"), 0xFF, vBytes.Item1, vBytes.Item2));
 
@@ -1111,22 +1129,20 @@ namespace Mint.CodeGenerators
             return writer.Result;
         }
 
-        private CodeWriter.CodeResult TryGenerateReturnInstanceSetup(
+        protected CodeWriter.CodeResult TryGenerateReturnInstanceSetup(
             CallableSymbol callable,
-            byte destRegister,
-            out bool isReturn)
+            byte destRegister)
         {
             CodeWriter writer = new();
 
-            isReturn = false;
             ITypeNode? returnType = callable.GetReturnType();
             if (returnType != null)
             {
-                isReturn = true;
                 TypeNode returnBaseType = returnType.GetBaseType();
-                if (_semantic.Module.LocalObjects.ContainsKey(returnBaseType.Name) ||
-                    _semantic.Module.XRefObjects.ContainsKey(returnBaseType.Name))
+                try 
                 {
+                    _semantic.Module.GetInstanciable(returnBaseType.Name); // if this throws then we couldn't find the object
+
                     if (_instanceRegs.TryGetValue(destRegister, out string? instName) && instName != returnBaseType.Name)
                     {
                         // register has the wrong instance pushed, pop it
@@ -1143,25 +1159,13 @@ namespace Mint.CodeGenerators
 
                     _instanceRegs[destRegister] = returnBaseType.Name;
                 }
+                catch
+                {
+                    return writer.Result;
+                }
             }
 
             return writer.Result;
-        }
-
-        private ITypeNode[] GetTypesFromArgs(IList<ExprNode> args, int line, int col)
-        {
-            List<ITypeNode> argTypes = new();
-            foreach (ExprNode arg in args)
-            {
-                ITypeNode? argType = _semantic.ExprTypes[arg];
-                if (argType == null)
-                    throw new CodeGeneratorException(
-                        "Argument cannot be of type 'void'.",
-                        line, col
-                    );
-                argTypes.Add(argType);
-            }
-            return argTypes.ToArray();
         }
 
         protected CodeWriter.CodeResult GeneratePushInstance(PushInstanceNode pushInstance, byte destRegister)
@@ -1173,43 +1177,36 @@ namespace Mint.CodeGenerators
             writer.Instructions.Add(new Instruction(GetOpcode("sppshz"), destRegister, vBytes.Item1, vBytes.Item2));
             _instanceRegs.Add(destRegister, pushInstance.ObjectName);
 
-            if (pushInstance.CtArgs != null)
+            writer.Append(GeneratePushInstanceCtCall(pushInstance, destRegister));
+
+            return writer.Result;
+        }
+
+        protected virtual CodeWriter.CodeResult GeneratePushInstanceCtCall(PushInstanceNode pushInstance, byte destRegister)
+        {
+            CodeWriter writer = new();
+
+            if (pushInstance.CtArgs == null) return writer.Result;
+
+            List<byte> regs = new();
+            foreach (ExprNode arg in pushInstance.CtArgs)
             {
-                List<byte> regs = new();
-                foreach (ExprNode arg in pushInstance.CtArgs)
-                {
-                    regs.Add(_registers.AllocateRegister());
-                    writer.Append(GenerateExpr(arg, regs[^1]));
-                }
-
-                writer.Instructions.Add(new Instruction(GetOpcode("ldfrsr"), 0, destRegister));
-                for (int i = 0; i < regs.Count; i++)
-                    writer.Instructions.Add(new Instruction(GetOpcode("ldfrsr"), (byte)(i + 1), regs[i]));
-
-                ITypeNode[] argTypes = GetTypesFromArgs(pushInstance.CtArgs, pushInstance.Line, pushInstance.Column);
-                if (_semantic.Module.LocalObjects.TryGetValue(pushInstance.ObjectName, out ObjectSymbol? objSbl))
-                    if (objSbl.FindConstructor(argTypes, out ConstructorSymbol? ctSbl))
-                        argTypes = Utility.ToTypeNodes(ctSbl.Parameters);
-                if (_semantic.Module.XRefObjects.TryGetValue(pushInstance.ObjectName, out XRefSymbol? xrefSbl))
-                    if (xrefSbl.FindConstructor(argTypes, out XRefConstructorSymbol? xrefCtSbl))
-                        argTypes = xrefCtSbl.GetParamTypes();
-
-                StringBuilder sb = new($"{pushInstance.ObjectName}.this(");
-                for (int i = 0; i < argTypes.Length; i++)
-                {
-                    sb.Append(argTypes[i].GetTypeName());
-                    if (i != argTypes.Length - 1)
-                        sb.Append(',');
-                }
-                sb.Append(')');
-
-                v = (ushort)AddOrGetXRef(sb.ToString());
-                vBytes = CodeWriter.ToBytes(v);
-                writer.Instructions.Add(new Instruction(GetOpcode("call"), 0xFF, vBytes.Item1, vBytes.Item2));
-
-                foreach (byte reg in regs)
-                    writer.Append(GenerateFreeRegister(reg));
+                regs.Add(_registers.AllocateRegister());
+                writer.Append(GenerateExpr(arg, regs[^1]));
             }
+
+            writer.Instructions.Add(new Instruction(GetOpcode("ldfrsr"), 0, destRegister));
+            for (int i = 0; i < regs.Count; i++)
+                writer.Instructions.Add(new Instruction(GetOpcode("ldfrsr"), (byte)(i + 1), regs[i]));
+
+            CallableSymbol sbl = _semantic.ExprCalls[pushInstance];
+
+            ushort v = (ushort)AddOrGetXRef($"{pushInstance.ObjectName}.{sbl.GetSignature()}");
+            (byte, byte) vBytes = CodeWriter.ToBytes(v);
+            writer.Instructions.Add(new Instruction(GetOpcode("call"), 0xFF, vBytes.Item1, vBytes.Item2));
+
+            foreach (byte reg in regs)
+                writer.Append(GenerateFreeRegister(reg));
 
             return writer.Result;
         }
@@ -1299,7 +1296,7 @@ namespace Mint.CodeGenerators
             return writer.Result;
         }
 
-        protected CodeWriter.CodeResult GenerateMemberIncrement(IncrementNode increment, MemberAccessNode member)
+        protected virtual CodeWriter.CodeResult GenerateMemberIncrement(IncrementNode increment, MemberAccessNode member)
         {
             CodeWriter writer = new();
 
@@ -1366,7 +1363,7 @@ namespace Mint.CodeGenerators
             return writer.Result;
         }
 
-        protected CodeWriter.CodeResult GenerateMemberOffset(MemberOffsetNode memberOffset, byte destRegister)
+        protected virtual CodeWriter.CodeResult GenerateMemberOffset(MemberOffsetNode memberOffset, byte destRegister)
         {
             CodeWriter writer = new();
 
@@ -1381,7 +1378,7 @@ namespace Mint.CodeGenerators
             return writer.Result;
         }
 
-        protected CodeWriter.CodeResult GenerateTypeCast(TypeCastNode typeCast, byte destRegister)
+        protected virtual CodeWriter.CodeResult GenerateTypeCast(TypeCastNode typeCast, byte destRegister)
         {
             CodeWriter writer = new();
 
@@ -1576,6 +1573,21 @@ namespace Mint.CodeGenerators
             return writer.Result;
         }
 
+        protected CodeWriter.CodeResult GenerateArgs(ExprNode[] args, out byte[] argRegs)
+        {
+            CodeWriter writer = new();
+
+            List<byte> regs = new();
+            foreach (ExprNode arg in args)
+            {
+                regs.Add(_registers.AllocateRegister());
+                writer.Append(GenerateExpr(arg, regs[^1]));
+            }
+
+            argRegs = regs.ToArray();
+            return writer.Result;
+        }
+
         protected void SetBreakJumpsV(CodeWriter writer)
         {
             foreach (Instruction breakJmp in _breakJmps.Pop())
@@ -1612,7 +1624,8 @@ namespace Mint.CodeGenerators
             )
         });
 
-        protected static bool AreBothType(ITypeNode a, ITypeNode b, string type) => a.GetBaseType().Name == type && b.GetBaseType().Name == type;
+        protected static bool AreBothType(ITypeNode a, ITypeNode b, string type)
+            => a.GetBaseType().Name == type && b.GetBaseType().Name == type;
 
         private static byte[] GetBytesFromInt(int bits)
         {

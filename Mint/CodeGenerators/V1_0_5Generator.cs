@@ -6,6 +6,7 @@ using Mint.Semantics;
 using System;
 using System.Collections.Generic;
 using System.Text;
+using Mint.Semantics.Symbols;
 
 namespace Mint.CodeGenerators
 {
@@ -99,7 +100,7 @@ namespace Mint.CodeGenerators
             v = (ushort)AddOrGetXRef($"{pushInstance.ObjectName}.{GetFuncSymbol(pushInstance).GetSignature()}");
             vBytes = CodeWriter.ToBytes(v);
             writer.Instructions.Add(new Instruction(GetCallOpcode(
-                _semantic.Module.GetInstanciable(pushInstance.ObjectName).GetLoc(),
+                _semantic.ExprCalls[pushInstance].CallLoc,
                 false
             ), 0xFF, vBytes.Item1, vBytes.Item2));
 
@@ -133,6 +134,211 @@ namespace Mint.CodeGenerators
 
             CodeWriter writer = new();
             writer.Instructions.Add(new Instruction(GetOpcode("fenter"), _registers.RegisterCount, argCount, (byte)flags));
+            return writer.Result;
+        }
+
+        protected override CodeWriter.CodeResult GenerateMemberAssign(AssignNode assign, MemberAccessNode targetMember)
+        {
+            CodeWriter writer = new();
+
+            byte objReg = _registers.AllocateRegister();
+            writer.Append(GenerateExpr(targetMember.Object, objReg));
+
+            byte valReg = _registers.AllocateRegister();
+            writer.Append(GenerateExpr(assign.Value, valReg));
+
+            byte y = (byte)AddOrGetXRef($"{_semantic.ExprTypes[targetMember.Object]?.GetBaseType().Name}.{targetMember.Member}");
+
+            writer.Instructions.Add(new Instruction(GetOpcode("stofa4"), objReg, valReg, y));
+
+            writer.Append(GenerateFreeRegister(objReg));
+            writer.Append(GenerateFreeRegister(valReg));
+            return writer.Result;
+        }
+
+        protected override CodeWriter.CodeResult GenerateMemberAccess(MemberAccessNode memberAccess, byte destRegister)
+        {
+            CodeWriter writer = new();
+
+            byte objReg = _registers.AllocateRegister();
+            writer.Append(GenerateExpr(memberAccess.Object, objReg));
+
+            byte y = (byte)AddOrGetXRef($"{_semantic.ExprTypes[memberAccess.Object]?.GetBaseType().Name}.{memberAccess.Member}");
+
+            writer.Instructions.Add(new Instruction(GetOpcode("ldofa4"), destRegister, objReg, y));
+
+            writer.Append(GenerateFreeRegister(objReg));
+            return writer.Result;
+        }
+
+        protected override string GetBinaryOpcodeFromOperator(string op, ITypeNode leftType, ITypeNode rightType) => op switch
+        {
+            "*" when AreBothType(leftType, rightType, "uint") => "mulu32",
+            "/" when AreBothType(leftType, rightType, "uint") => "divu32",
+            "%" when AreBothType(leftType, rightType, "uint") => "modu32",
+            "<" or ">" when AreBothType(leftType, rightType, "uint") => "ltu32",
+            "<=" or ">=" when AreBothType(leftType, rightType, "uint") => "leu32",
+            "==" when leftType.IsRef() && rightType.IsRef() => "eqptr",
+            "!=" when leftType.IsRef() && rightType.IsRef() => "neptr",
+            "==" when AreBothType(leftType, rightType, "string") => "eqstr",
+            "!=" when AreBothType(leftType, rightType, "string") => "nestr",
+
+            _ => base.GetBinaryOpcodeFromOperator(op, leftType, rightType)
+        };
+
+        protected override bool ShouldInvertOperands(string opcode, string operation)
+            => opcode is "lts32" or "les32" or "ltf32" or "lef32" && operation is ">" or ">=";
+
+        protected override CodeWriter.CodeResult GenerateQualifiedCall(QualifiedCallNode qualifiedCall, byte destRegister)
+        {
+            CodeWriter writer = new();
+
+            CallableSymbol sbl = _semantic.ExprCalls[qualifiedCall];
+
+            writer.Append(TryGenerateReturnInstanceSetup(sbl, destRegister));
+
+            writer.Append(GenerateArgs(qualifiedCall.Args.ToArray(), out byte[] regs));
+
+            writer.Append(GenerateParamLoading(regs));
+
+            ushort v = (ushort)AddOrGetXRef(qualifiedCall.FullName + sbl.GetSignatureWithoutName());
+            (byte, byte) vBytes = CodeWriter.ToBytes(v);
+            writer.Instructions.Add(new Instruction(GetCallOpcode(sbl.CallLoc, true), 0xFF, vBytes.Item1, vBytes.Item2));
+
+            if (sbl.GetReturnType() != null)
+                writer.Instructions.Add(new Instruction(GetOpcode("ldsrfz"), destRegister));
+
+            foreach (byte reg in regs)
+                writer.Append(GenerateFreeRegister(reg));
+            return writer.Result;
+        }
+
+        protected override CodeWriter.CodeResult GenerateMemberCall(MemberCallNode memberCall, byte destRegister)
+        {
+            CodeWriter writer = new();
+
+            CallableSymbol sbl = _semantic.ExprCalls[memberCall];
+
+            writer.Append(TryGenerateReturnInstanceSetup(sbl, destRegister));
+
+            byte objReg = _registers.AllocateRegister();
+            writer.Append(GenerateExpr(memberCall.Object, objReg));
+
+            writer.Append(GenerateArgs(memberCall.Args.ToArray(), out byte[] regs));
+
+            writer.Append(GenerateParamLoading(regs, objReg));
+
+            ITypeNode? objType = _semantic.ExprTypes[memberCall.Object];
+            if (objType == null)
+                throw new CodeGeneratorException(
+                    "Cannot call from object of type 'void'.",
+                    memberCall.Line,
+                    memberCall.Column
+                );
+
+            ushort v = (ushort)AddOrGetXRef($"{objType.GetBaseType().Name}.{sbl.GetSignature()}");
+            (byte, byte) vBytes = CodeWriter.ToBytes(v);
+            writer.Instructions.Add(new Instruction(GetCallOpcode(sbl.CallLoc, false), 0xFF, vBytes.Item1, vBytes.Item2));
+
+            if (sbl.GetReturnType() != null)
+                writer.Instructions.Add(new Instruction(GetOpcode("ldsrfz"), destRegister));
+
+            writer.Append(GenerateFreeRegister(objReg));
+            foreach (byte reg in regs)
+                writer.Append(GenerateFreeRegister(reg));
+            return writer.Result;
+        }
+
+        protected override CodeWriter.CodeResult GeneratePushInstanceCtCall(PushInstanceNode pushInstance, byte destRegister)
+        {
+            CodeWriter writer = new();
+
+            if (pushInstance.CtArgs == null) return writer.Result;
+
+            writer.Append(GenerateArgs(pushInstance.CtArgs.ToArray(), out byte[] regs));
+
+            writer.Append(GenerateParamLoading(regs, destRegister));
+
+            CallableSymbol sbl = _semantic.ExprCalls[pushInstance];
+
+            ushort v = (ushort)AddOrGetXRef($"{pushInstance.ObjectName}.{sbl.GetSignature()}");
+            (byte, byte) vBytes = CodeWriter.ToBytes(v);
+            writer.Instructions.Add(new Instruction(GetCallOpcode(sbl.CallLoc, false), 0xFF, vBytes.Item1, vBytes.Item2));
+
+            foreach (byte reg in regs)
+                writer.Append(GenerateFreeRegister(reg));
+            return writer.Result;
+        }
+
+        protected override CodeWriter.CodeResult GenerateMemberIncrement(IncrementNode increment, MemberAccessNode member)
+        {
+            CodeWriter writer = new();
+
+            byte valReg = _registers.AllocateRegister();
+            writer.Append(GenerateMemberAccess(member, valReg));
+
+            writer.Append(GenerateIncrementRegister(increment, valReg));
+
+            byte objReg = _registers.AllocateRegister();
+            writer.Append(GenerateExpr(member.Object, objReg));
+
+            byte y = (byte)AddOrGetXRef($"{_semantic.ExprTypes[member.Object]?.GetBaseType().Name}.{member.Member}");
+
+            writer.Instructions.Add(new Instruction(GetOpcode("stofa4"), objReg, valReg, y));
+
+            writer.Append(GenerateFreeRegister(valReg));
+            writer.Append(GenerateFreeRegister(objReg));
+            return writer.Result;
+        }
+
+        protected override CodeWriter.CodeResult GenerateMemberOffset(MemberOffsetNode memberOffset, byte destRegister)
+        {
+            CodeWriter writer = new();
+
+            byte objReg = _registers.AllocateRegister();
+            writer.Append(GenerateExpr(memberOffset.Object, objReg));
+
+            byte y = (byte)AddOrGetXRef($"{_semantic.ExprTypes[memberOffset.Object]?.GetBaseType().Name}.{memberOffset.Member}");
+
+            writer.Instructions.Add(new Instruction(GetOpcode("ldaddr"), destRegister, objReg, y));
+
+            writer.Append(GenerateFreeRegister(objReg));
+            return writer.Result;
+        }
+
+        protected override CodeWriter.CodeResult GenerateTypeCast(TypeCastNode typeCast, byte destRegister)
+        {
+            CodeWriter writer = new();
+
+            byte exprReg = _registers.AllocateRegister();
+            writer.Append(GenerateExpr(typeCast.Expr, exprReg));
+
+            TypeNode? ogType = _semantic.ExprTypes[typeCast.Expr]?.GetBaseType();
+            if (ogType == null)
+                throw new CodeGeneratorException($"Type cast with 'void' expression encountered.", typeCast.Line, typeCast.Column);
+
+            if (ogType.Name == typeCast.Type)
+            {
+                writer.Instructions.Add(new Instruction(GetOpcode("ldsrsr"), destRegister, exprReg));
+                writer.Append(GenerateFreeRegister(exprReg));
+                return writer.Result;
+            }
+
+            string opcode = ogType.Name switch
+            {
+                "float" when typeCast.Type is "int" => "cts32f",
+                "uint" when typeCast.Type is "int" => "cts32u",
+                "int" when typeCast.Type is "uint" => "ctu32s",
+                "float" when typeCast.Type is "uint" => "ctu32f",
+                "int" when typeCast.Type is "float" => "ctf32s",
+                "uint" when typeCast.Type is "float" => "ctf32u",
+
+                _ => throw new CodeGeneratorException("Unknown type conversion.", typeCast.Line, typeCast.Column)
+            };
+
+            writer.Instructions.Add(new Instruction(GetOpcode(opcode), destRegister, exprReg));
+
+            writer.Append(GenerateFreeRegister(exprReg));
             return writer.Result;
         }
 

@@ -8,6 +8,8 @@ namespace Mint.Semantics.Symbols
 {
     public abstract class CallableSymbol
     {
+        public required ObjectLocation CallLoc { get; init; }
+
         public string GetSignatureWithoutName()
         {
             StringBuilder sb = new(NameOperations.BuildCallParamTypes(GetParamTypes()));
